@@ -39,4 +39,46 @@ final class EventRepository
         ]);
         return (int) $this->db->lastInsertId();
     }
+
+    public function attendanceEvents(): array
+    {
+        $statement = $this->db->prepare(
+            'SELECT id, title, starts_at, event_type FROM events WHERE tenant_id=:tenant AND status_name <> \'cancelled\' ORDER BY starts_at DESC LIMIT 30'
+        );
+        $statement->execute(['tenant' => $this->tenant->id()]);
+        return $statement->fetchAll();
+    }
+
+    public function attendanceMatrix(int $eventId): array
+    {
+        $statement = $this->db->prepare(
+            'SELECT m.id, m.first_name, m.last_name, m.member_type,
+                    COALESCE(er.response_status, \'open\') AS response_status,
+                    er.responded_at
+             FROM members m
+             LEFT JOIN event_responses er ON er.member_id=m.id AND er.event_id=:event AND er.tenant_id=:tenant
+             WHERE m.tenant_id=:tenant AND m.status_name=\'active\'
+             ORDER BY m.last_name, m.first_name'
+        );
+        $statement->execute(['tenant' => $this->tenant->id(), 'event' => $eventId]);
+        return $statement->fetchAll();
+    }
+
+    public function saveAttendance(int $eventId, int $memberId, string $status): void
+    {
+        $allowed = ['yes', 'no', 'maybe', 'open'];
+        if (!in_array($status, $allowed, true)) {
+            $status = 'open';
+        }
+        $lookup = $this->db->prepare('SELECT id FROM event_responses WHERE tenant_id=:tenant AND event_id=:event AND member_id=:member');
+        $lookup->execute(['tenant' => $this->tenant->id(), 'event' => $eventId, 'member' => $memberId]);
+        $id = $lookup->fetchColumn();
+        if ($id) {
+            $statement = $this->db->prepare('UPDATE event_responses SET response_status=:status, responded_at=CURRENT_TIMESTAMP WHERE id=:id AND tenant_id=:tenant');
+            $statement->execute(['status' => $status, 'id' => $id, 'tenant' => $this->tenant->id()]);
+            return;
+        }
+        $statement = $this->db->prepare('INSERT INTO event_responses (tenant_id,event_id,member_id,response_status,responded_at) VALUES (:tenant,:event,:member,:status,CURRENT_TIMESTAMP)');
+        $statement->execute(['tenant' => $this->tenant->id(), 'event' => $eventId, 'member' => $memberId, 'status' => $status]);
+    }
 }
