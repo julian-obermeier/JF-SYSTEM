@@ -53,6 +53,19 @@ function update_create_tables(PDO $pdo, string $file): void
     }
 }
 
+function update_run_sql_file(PDO $pdo, string $file): void
+{
+    $sql = file_get_contents($file);
+    if ($sql === false) throw new RuntimeException('Migrationsdatei konnte nicht gelesen werden: ' . basename($file));
+    foreach (array_filter(array_map('trim', explode(';', $sql))) as $statement) {
+        try { $pdo->exec($statement); }
+        catch (PDOException $exception) {
+            // 1060/1061: Spalte/Index schon vorhanden – wichtig nach abgebrochenen Updates.
+            if (!in_array((int)($exception->errorInfo[1] ?? 0), [1050,1060,1061], true)) throw $exception;
+        }
+    }
+}
+
 $pdo->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
     migration_key VARCHAR(100) PRIMARY KEY,
     applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -60,9 +73,15 @@ $pdo->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
 
 $key002 = '002-member-records-events-responses';
 $key003 = '003-member-documents';
+$key004 = '004-saas-platform';
+$key005 = '005-saas-operations';
+$key006 = '006-tenant-management';
 $has002 = update_migration_applied($pdo, $key002);
 $has003 = update_migration_applied($pdo, $key003);
-$isCurrent = $has002 && $has003;
+$has004 = update_migration_applied($pdo, $key004);
+$has005 = update_migration_applied($pdo, $key005);
+$has006 = update_migration_applied($pdo, $key006);
+$isCurrent = $has002 && $has003 && $has004 && $has005 && $has006;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isCurrent) {
     require_csrf();
@@ -119,7 +138,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isCurrent) {
             $has003 = true;
         }
 
-        $isCurrent = $has002 && $has003;
+        foreach ([
+            [$key004, '004_saas_platform.sql', 'Migration 004 – SaaS-Tarife und Abonnements'],
+            [$key005, '005_saas_operations.sql', 'Migration 005 – SaaS-Betrieb und Benachrichtigungen'],
+            [$key006, '006_tenant_management.sql', 'Migration 006 – Mandantenverwaltung, Rollen und Datenschutz'],
+        ] as [$migrationKey, $migrationFile, $migrationLabel]) {
+            if (!update_migration_applied($pdo, $migrationKey)) {
+                update_run_sql_file($pdo, dirname(__DIR__) . '/database/migrations/' . $migrationFile);
+                update_record_migration($pdo, $migrationKey);
+                audit('system_update', 'schema_migrations', null, $migrationLabel . ' installiert');
+                $messages[] = $migrationLabel;
+            }
+        }
+        $has004 = $has005 = $has006 = true;
+
+        $planInsert=$pdo->prepare('INSERT IGNORE INTO saas_plans (plan_key,name,description,monthly_price,yearly_price,member_limit,user_limit,storage_limit_mb) VALUES (?,?,?,?,?,?,?,?)');
+        foreach([
+            ['free','Free','Für kleine Jugendfeuerwehren zum Einstieg.',0,0,50,5,250],
+            ['standard','Standard','Die vollständige Basisverwaltung.',9.90,99,250,15,2048],
+            ['professional','Professional','Mehr Automatisierung und Auswertungen.',19.90,199,1000,50,10240],
+            ['enterprise','Enterprise','Individuelle Limits und Betreuung.',49.90,499,null,null,51200],
+        ] as $plan)$planInsert->execute($plan);
+        $freeId=(int)$pdo->query("SELECT id FROM saas_plans WHERE plan_key='free'")->fetchColumn();
+        $enterpriseId=(int)$pdo->query("SELECT id FROM saas_plans WHERE plan_key='enterprise'")->fetchColumn();
+        $legacy=$pdo->query('SELECT o.id,o.name,o.email,EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=o.id AND u.is_superadmin=1) operator_tenant FROM organizations o LEFT JOIN saas_subscriptions s ON s.tenant_id=o.id WHERE s.id IS NULL')->fetchAll();
+        $subscriptionInsert=$pdo->prepare('INSERT INTO saas_subscriptions (tenant_id,plan_id,status_name,billing_cycle,starts_at,trial_ends_at,current_period_start,current_period_end) VALUES (?,?,?,\'manual\',?,?,?,?)');
+        $settingsInsert=$pdo->prepare('INSERT IGNORE INTO saas_tenant_settings (tenant_id,display_name,support_email) VALUES (?,?,?)');
+        foreach($legacy as $tenant){$operator=(int)$tenant['operator_tenant']===1;$today=date('Y-m-d');$end=$operator?null:date('Y-m-d',strtotime('+30 days'));$subscriptionInsert->execute([(int)$tenant['id'],$operator?$enterpriseId:$freeId,$operator?'active':'trial',$today,$end,$today,$end]);$settingsInsert->execute([(int)$tenant['id'],$tenant['name'],$tenant['email']?:null]);}
+
+        $isCurrent = $has002 && $has003 && $has004 && $has005 && $has006;
     } catch (Throwable $exception) {
         $error = $exception->getMessage();
     }
@@ -135,6 +182,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isCurrent) {
 <?php if ($messages): ?><div class="status"><strong>Installiert:</strong><ul class="list"><?php foreach ($messages as $message): ?><li><?= e($message) ?></li><?php endforeach; ?></ul></div><?php endif; ?>
 <div class="version"><span>002 · Mitgliederakten & Rückmeldungen</span><span class="<?= $has002?'ok':'pending' ?>"><?= $has002?'Installiert':'Ausstehend' ?></span></div>
 <div class="version"><span>003 · Dokumentenablage</span><span class="<?= $has003?'ok':'pending' ?>"><?= $has003?'Installiert':'Ausstehend' ?></span></div>
+<div class="version"><span>004 · SaaS-Tarife & Abonnements</span><span class="<?= $has004?'ok':'pending' ?>"><?= $has004?'Installiert':'Ausstehend' ?></span></div>
+<div class="version"><span>005 · SaaS-Betrieb & Meldungen</span><span class="<?= $has005?'ok':'pending' ?>"><?= $has005?'Installiert':'Ausstehend' ?></span></div>
+<div class="version"><span>006 · Mandantenverwaltung & DSGVO</span><span class="<?= $has006?'ok':'pending' ?>"><?= $has006?'Installiert':'Ausstehend' ?></span></div>
 <?php if ($isCurrent): ?><div class="status" style="margin-top:20px"><strong>System ist aktuell.</strong><br>Alle verfügbaren Migrationen wurden installiert.</div><div class="actions"><a class="btn" href="../">Zur Anwendung</a></div>
 <?php else: ?><p>Erstellen Sie vor dem Start eine vollständige Datenbanksicherung. Das Update kann danach ohne SSH im Browser ausgeführt werden.</p><form method="post"><?= csrf_field() ?><button class="btn">Ausstehende Updates installieren</button> <a class="btn secondary" href="../">Abbrechen</a></form><?php endif; ?>
 </div></section></main></body></html>

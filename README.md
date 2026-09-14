@@ -16,6 +16,13 @@ Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehr
 - Zu-/Absagen, Rückmeldefristen und Anwesenheitserfassung
 - Qualifikationen
 - Benutzer- und Grundeinstellungen
+- Mandantenzentrale mit frei definierbaren Rollen und Rechten
+- Modulfreigaben, Tariflimits und kontrollierter Lesemodus
+- Individuelles Branding und konfigurierbare Dashboard-Bausteine
+- DSGVO-Vorgänge und maschinenlesbarer Mitgliederdatenexport
+- Sichere Mandantensicherungen und geprüfte Wiederherstellungsanforderungen
+- Benachrichtigungszentrale
+- Sichtbarer, schreibgeschützter und auditierter Betreiber-Supportmodus
 - Audit-Protokoll
 - Responsives Feuerwehr-Design
 - Browserbasierter Online-Installer ohne SSH, Docker oder Composer
@@ -24,7 +31,7 @@ Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehr
 
 - PHP 8.1 oder neuer
 - MySQL 8.0 oder MariaDB 10.5 oder neuer
-- PHP-Erweiterungen: PDO, pdo_mysql, mbstring, json
+- PHP-Erweiterungen: PDO, pdo_mysql, mbstring, json, fileinfo
 - Schreibrechte für `config/` und `storage/`
 
 ## Installation
@@ -40,7 +47,7 @@ Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehr
 1. Vorher Datenbank und Dateien sichern.
 2. Aktualisierte Dateien hochladen.
 3. Als Administrator `/update/` aufrufen.
-4. Ausstehende Migrationen **002/003** unter `/update/` ausführen.
+4. Ausstehende Migrationen **002 bis 006** unter `/update/` ausführen.
 5. Den Ordner `update/` anschließend sperren oder löschen.
 
 Die Anwendung benötigt weder Composer noch Node.js und ist für übliches Shared Hosting geeignet.
@@ -62,12 +69,12 @@ Support wird über OBERMEIER IT bereitgestellt: https://ticket.obermeier-it.de
 
 ## SaaS-Betreiberbereich
 
-Plattform-Superadministratoren öffnen den zentralen Betreiberbereich unter `/saas/`. Beim ersten Aufruf werden die SaaS-Tabellen automatisch angelegt und die Tarife Free, Standard, Professional und Enterprise eingerichtet.
+Plattform-Superadministratoren öffnen den zentralen Betreiberbereich unter `/saas/`. Mandantenadministratoren erreichen die Mandantenzentrale über **Einstellungen → Mandantenzentrale**.
 
 Enthalten sind zunächst Mandanten-Onboarding, 30-Tage-Testphase, Tarifzuordnung, manuelle Abrechnung, Rechnungsstatus und vorbereitete Add-ons. Die Zahlungsanbindung ist bewusst providerneutral vorbereitet und kann später um Stripe oder PayPal ergänzt werden.
 
 ## Status
 
-Aktueller Entwicklungsstand: **v0.4.0 – SaaS-Grundlage und Betreiberbereich**
+Aktueller Entwicklungsstand: **v0.5.0 – SaaS-Mandantenverwaltung**
 
 Diese Fassung ist eine produktionsnahe Grundlage. Vor einem Echtbetrieb mit personenbezogenen Daten sind Datenschutzkonzept, Berechtigungsmatrix, Backups, Mailversand und ein Hosting-Sicherheitsaudit zu vervollständigen.

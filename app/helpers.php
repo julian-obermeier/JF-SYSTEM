@@ -14,7 +14,12 @@ function db(): PDO
 
 function tenant_id(): int
 {
-    return (int) ($_SESSION['tenant_id'] ?? 0);
+    return (int) ($_SESSION['support_tenant_id'] ?? $_SESSION['tenant_id'] ?? 0);
+}
+
+function support_mode(): bool
+{
+    return isset($_SESSION['support_tenant_id'], $_SESSION['support_session_id']);
 }
 
 function e(mixed $value): string

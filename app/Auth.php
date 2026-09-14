@@ -91,7 +91,11 @@ final class Auth
     public static function canManage(): bool
     {
         $user = self::user();
-        return $user && ((int) $user['is_superadmin'] === 1 || in_array($user['role'], ['admin', 'leader'], true));
+        if (!$user) return false;
+        if (class_exists('TenantAccess') && TenantAccess::tableExists('tenant_user_roles')) {
+            return TenantAccess::can('manage_records');
+        }
+        return (int) $user['is_superadmin'] === 1 || in_array($user['role'], ['admin', 'leader'], true);
     }
 
     public static function isAdmin(): bool

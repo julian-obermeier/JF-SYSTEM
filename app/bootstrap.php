@@ -30,6 +30,7 @@ session_set_cookie_params([
 session_start();
 
 require APP_ROOT . '/app/Auth.php';
+require APP_ROOT . '/app/TenantAccess.php';
 
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');

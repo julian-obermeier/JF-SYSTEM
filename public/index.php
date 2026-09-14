@@ -54,6 +54,19 @@ if ($page === 'login') {
 Auth::requireLogin();
 $user = Auth::user();
 $tenantId = tenant_id();
+$tenantSettings = TenantAccess::settings();
+
+if (isset($_GET['tenant_logo']) && !empty($tenantSettings['logo_path'])) {
+    $logoFile = dirname(__DIR__) . '/storage/tenant-branding/' . $tenantId . '/' . basename((string) $tenantSettings['logo_path']);
+    if (!is_file($logoFile)) { http_response_code(404); exit('Logo nicht gefunden.'); }
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file($logoFile) ?: 'application/octet-stream';
+    header('Content-Type: ' . $mime); header('Content-Length: ' . filesize($logoFile)); header('Cache-Control: public, max-age=3600'); readfile($logoFile); exit;
+}
+
+$pageModules = ['members'=>'members','events'=>'events','attendance'=>'attendance','qualifications'=>'qualifications'];
+if (isset($pageModules[$page]) && !TenantAccess::moduleEnabled($pageModules[$page])) {
+    flash('error', 'Dieses Modul ist für Ihre Organisation deaktiviert.'); redirect('?page=dashboard');
+}
 
 $downloadId = (int) ($_GET['download_document'] ?? 0);
 if ($downloadId > 0) {
@@ -116,6 +129,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('?page=login');
         }
 
+        if (TenantAccess::readOnly()) {
+            throw new RuntimeException(support_mode() ? 'Im sichtbaren Supportmodus sind Änderungen gesperrt.' : 'Ihr Tarif befindet sich im Lesemodus. Daten können angesehen, aber nicht verändert werden.');
+        }
+
         if (!Auth::canManage()) {
             throw new RuntimeException('Sie besitzen für diese Aktion keine Berechtigung.');
         }
@@ -136,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ((int) ($file['size'] ?? 0) > 8 * 1024 * 1024) {
                 throw new RuntimeException('Dokumente dürfen maximal 8 MB groß sein.');
             }
+            TenantAccess::assertCanCreate('storage_mb', max(1, (int) ceil(((int) $file['size']) / 1048576)));
             $originalName = basename((string) ($file['name'] ?? 'dokument'));
             $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
             $allowedExtensions = ['pdf','jpg','jpeg','png','doc','docx'];
@@ -237,6 +255,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([...array_values($fields), $id, $tenantId]);
                 audit('update', 'members', $id, 'Mitgliedsakte aktualisiert: ' . $firstName . ' ' . $lastName);
             } else {
+                TenantAccess::assertCanCreate('members');
                 $columns = implode(',', array_keys($fields));
                 $placeholders = implode(',', array_fill(0, count($fields), '?'));
                 $stmt = db()->prepare('INSERT INTO members (' . $columns . ',tenant_id) VALUES (' . $placeholders . ',?)');
@@ -461,6 +480,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($action === 'user_save' && Auth::isAdmin()) {
+            TenantAccess::assertCanCreate('users');
             $email = mb_strtolower(trim((string) ($_POST['email'] ?? '')));
             $password = (string) ($_POST['password'] ?? '');
             if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 10) {
@@ -493,7 +513,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $flash = pull_flash();
 $pageTitles = [
-    'dashboard' => ['Übersicht', $user['organization_name']],
+    'dashboard' => [$tenantSettings['dashboard_title'] ?: 'Übersicht', $user['organization_name']],
     'members' => ['Mitglieder', 'Jugendliche und Betreuer verwalten'],
     'events' => ['Dienste & Übungen', 'Termine planen und veröffentlichen'],
     'attendance' => ['Anwesenheit', 'Teilnahmen zuverlässig dokumentieren'],
@@ -510,10 +530,17 @@ $navItems = [
     'attendance' => ['check', 'Anwesenheit'],
     'qualifications' => ['award', 'Qualifikationen'],
 ];
+$navItems = array_filter($navItems, static fn(array $item, string $key): bool => $key === 'dashboard' || TenantAccess::moduleEnabled($key), ARRAY_FILTER_USE_BOTH);
 if (Auth::isAdmin()) {
     $navItems['users'] = ['shield', 'Benutzer & Rollen'];
     $navItems['settings'] = ['settings', 'Einstellungen'];
 }
+$widgetState = [];
+if (TenantAccess::tableExists('tenant_dashboard_widgets')) {
+    $widgetStmt = db()->prepare('SELECT widget_key,is_visible FROM tenant_dashboard_widgets WHERE tenant_id=?');
+    $widgetStmt->execute([$tenantId]); $widgetState = array_column($widgetStmt->fetchAll(), 'is_visible', 'widget_key');
+}
+$widgetVisible = static fn(string $key): bool => !isset($widgetState[$key]) || (int) $widgetState[$key] === 1;
 $leaderStmt = db()->prepare("SELECT id,first_name,last_name FROM users WHERE tenant_id=? AND is_active=1 AND role IN ('admin','leader','staff') ORDER BY last_name,first_name");
 $leaderStmt->execute([$tenantId]);
 $leaders = $leaderStmt->fetchAll();
@@ -524,12 +551,13 @@ $leaders = $leaderStmt->fetchAll();
 <meta name="robots" content="noindex,nofollow">
 <title><?= e($heading) ?> · JF-SYSTEM.de</title>
 <link rel="stylesheet" href="<?= e(asset_url('app.css')) ?>">
+<style>:root{--red:<?= e($tenantSettings['primary_color']) ?>;--red-dark:<?= e($tenantSettings['primary_color']) ?>;--navy-950:<?= e($tenantSettings['secondary_color']) ?>;--navy-900:<?= e($tenantSettings['secondary_color']) ?>;--navy-800:<?= e($tenantSettings['secondary_color']) ?>}</style>
 <script src="<?= e(asset_url('app.js')) ?>" defer></script>
 </head>
 <body>
 <div class="app">
 <aside class="sidebar">
-<a class="brand" href="?page=dashboard"><div class="brand-mark">🔥</div><div><div class="brand-title">JF-SYSTEM<em>.de</em></div><div class="brand-sub">Stark. Gemeinsam. Für morgen.</div></div></a>
+<a class="brand" href="?page=dashboard"><div class="brand-mark"><?php if(!empty($tenantSettings['logo_path'])):?><img src="?tenant_logo=1" alt="" style="width:38px;height:38px;object-fit:contain"><?php else:?>🔥<?php endif;?></div><div><div class="brand-title"><?= e($tenantSettings['display_name'] ?: 'JF-SYSTEM') ?><em><?= empty($tenantSettings['display_name']) ? '.de' : '' ?></em></div><div class="brand-sub">Stark. Gemeinsam. Für morgen.</div></div></a>
 <nav class="nav" aria-label="Hauptnavigation">
 <?php foreach ($navItems as $key => [$navIcon, $label]): ?><a href="?page=<?= e($key) ?>" class="<?= $page === $key ? 'active' : '' ?>"><?= icon($navIcon) ?><span><?= e($label) ?></span></a><?php endforeach; ?>
 </nav>
@@ -545,6 +573,7 @@ $leaders = $leaderStmt->fetchAll();
 </div>
 </header>
 <main class="content">
+<?php if (support_mode()): ?><div class="flash flash-error"><strong>Supportmodus aktiv:</strong> Mandant #<?= $tenantId ?> wird schreibgeschützt angezeigt. <a href="saas/support.php?action=stop">Supportmodus beenden</a></div><?php elseif (TenantAccess::readOnly()): ?><div class="flash flash-error"><strong>Lesemodus:</strong> Ihr Tarif erlaubt derzeit keine Änderungen. Vorhandene Daten bleiben erreichbar.</div><?php endif; ?>
 <?php if ($flash): ?><div class="flash <?= $flash['type'] === 'error' ? 'flash-error' : '' ?>"><?= e($flash['message']) ?></div><?php endif; ?>
 <div class="page-head"><div><h1><?= e($heading) ?></h1><p><?= e($subheading) ?></p></div>
 <?php if ($page === 'members' && Auth::canManage()): ?><a class="btn btn-secondary" href="?export=members"><?= icon('download') ?> CSV exportieren</a><button class="btn btn-primary" data-dialog-open="member-dialog"><?= icon('plus') ?> Mitglied anlegen</button><?php endif; ?>
@@ -595,19 +624,19 @@ $leaders = $leaderStmt->fetchAll();
 <div class="metric <?= $consentAlertCount ? 'metric-alert' : '' ?>"><div class="metric-icon"><?= icon('file') ?></div><div><strong><?= $consentAlertCount ?></strong><span>Einwilligungen prüfen</span></div></div>
 </div>
 <div class="dashboard-grid">
-<section class="panel"><div class="panel-head"><div><p class="eyebrow">Im Blick behalten</p><h2>Nächste Geburtstage</h2></div><a class="btn btn-secondary btn-small" href="?page=members">Mitglieder</a></div><div class="panel-body compact-list"><?php if(!$birthdayRows): ?><div class="empty">Keine Geburtstage hinterlegt.</div><?php endif; ?><?php foreach($birthdayRows as $birthday): ?><div class="list-row"><div><strong><?= e($birthday['first_name'].' '.$birthday['last_name']) ?></strong><small><?= e($birthday['age']) ?> Jahre</small></div><span><?= e($birthday['next_date']->format('d.m.')) ?></span></div><?php endforeach; ?></div></section>
-<section class="panel"><div class="panel-head"><div><p class="eyebrow">Fristen</p><h2>Einwilligungen laufen ab</h2></div><a class="btn btn-secondary btn-small" href="?page=members">Akte öffnen</a></div><div class="panel-body compact-list"><?php if(!$consentDeadlines): ?><div class="empty">Keine Fristen in den nächsten 45 Tagen.</div><?php endif; ?><?php foreach($consentDeadlines as $deadline): ?><div class="list-row"><div><strong><?= e($deadline['title']) ?></strong><small><?= e($deadline['first_name'].' '.$deadline['last_name']) ?></small></div><span class="alert-count"><?= e(format_date($deadline['expires_at'])) ?></span></div><?php endforeach; ?></div></section>
+<?php if($widgetVisible('birthdays')):?><section class="panel"><div class="panel-head"><div><p class="eyebrow">Im Blick behalten</p><h2>Nächste Geburtstage</h2></div><a class="btn btn-secondary btn-small" href="?page=members">Mitglieder</a></div><div class="panel-body compact-list"><?php if(!$birthdayRows): ?><div class="empty">Keine Geburtstage hinterlegt.</div><?php endif; ?><?php foreach($birthdayRows as $birthday): ?><div class="list-row"><div><strong><?= e($birthday['first_name'].' '.$birthday['last_name']) ?></strong><small><?= e($birthday['age']) ?> Jahre</small></div><span><?= e($birthday['next_date']->format('d.m.')) ?></span></div><?php endforeach; ?></div></section><?php endif;?>
+<?php if($widgetVisible('consents')):?><section class="panel"><div class="panel-head"><div><p class="eyebrow">Fristen</p><h2>Einwilligungen laufen ab</h2></div><a class="btn btn-secondary btn-small" href="?page=members">Akte öffnen</a></div><div class="panel-body compact-list"><?php if(!$consentDeadlines): ?><div class="empty">Keine Fristen in den nächsten 45 Tagen.</div><?php endif; ?><?php foreach($consentDeadlines as $deadline): ?><div class="list-row"><div><strong><?= e($deadline['title']) ?></strong><small><?= e($deadline['first_name'].' '.$deadline['last_name']) ?></small></div><span class="alert-count"><?= e(format_date($deadline['expires_at'])) ?></span></div><?php endforeach; ?></div></section><?php endif;?>
 </div>
 <div class="dashboard-grid">
-<section class="panel"><div class="panel-head"><h2>Nächster Dienst</h2><a class="btn btn-secondary btn-small" href="?page=events">Alle anzeigen</a></div><div class="panel-body">
+<?php if($widgetVisible('next_event')):?><section class="panel"><div class="panel-head"><h2>Nächster Dienst</h2><a class="btn btn-secondary btn-small" href="?page=events">Alle anzeigen</a></div><div class="panel-body">
 <?php if ($nextEvent): ?><div class="next-event"><h3><?= e($nextEvent['title']) ?></h3><div class="detail-list"><span><?= icon('calendar') ?> <?= e(format_date($nextEvent['starts_at'], true)) ?> Uhr</span><span><?= icon('home') ?> <?= e($nextEvent['location_name'] ?: 'Kein Ort hinterlegt') ?></span><span><?= icon('file') ?> <?= e($nextEvent['description_text'] ?: 'Keine Beschreibung hinterlegt') ?></span></div></div>
 <?php else: ?><div class="empty">Noch kein kommender Dienst geplant.</div><?php endif; ?>
-</div></section>
-<section class="panel"><div class="panel-head"><h2>Schnellzugriff</h2></div><div class="panel-body quick-actions"><a href="?page=members">Mitglieder verwalten</a><a href="?page=events">Dienstplan öffnen</a><a href="?page=attendance">Anwesenheit erfassen</a><a href="?page=qualifications">Qualifikationen prüfen</a></div></section>
-<section class="panel" style="grid-column:1/-1"><div class="panel-head"><h2>Letzte Aktivitäten</h2></div><div class="panel-body activity-list">
+</div></section><?php endif;?>
+<?php if($widgetVisible('quick_actions')):?><section class="panel"><div class="panel-head"><h2>Schnellzugriff</h2></div><div class="panel-body quick-actions"><a href="?page=members">Mitglieder verwalten</a><a href="?page=events">Dienstplan öffnen</a><a href="?page=attendance">Anwesenheit erfassen</a><a href="?page=qualifications">Qualifikationen prüfen</a></div></section><?php endif;?>
+<?php if($widgetVisible('activity')):?><section class="panel" style="grid-column:1/-1"><div class="panel-head"><h2>Letzte Aktivitäten</h2></div><div class="panel-body activity-list">
 <?php if (!$activities): ?><div class="empty">Noch keine Aktivitäten vorhanden.</div><?php endif; ?>
 <?php foreach ($activities as $activity): ?><div class="activity"><span class="dot"></span><div><strong><?= e($activity['description_text']) ?></strong><small><?= e($activity['user_name'] ?: 'System') ?></small></div><small><?= e(format_date($activity['created_at'], true)) ?></small></div><?php endforeach; ?>
-</div></section></div>
+</div></section><?php endif;?></div>
 
 <?php elseif ($page === 'members'):
     $stmt = db()->prepare("SELECT m.*,
@@ -765,6 +794,7 @@ $stmt=db()->prepare('SELECT * FROM organizations WHERE id=?');$stmt->execute([$t
 <div class="field"><label>Telefon</label><input name="phone" value="<?= e($organization['phone']) ?>"></div>
 <div class="field field-full"><label>Zentrale E-Mail</label><input name="email" type="email" value="<?= e($organization['email']) ?>"></div>
 </div></form></section>
+<section class="panel"><div class="panel-head"><div><h2>Mandantenzentrale</h2><p class="muted">Rollen, Module, Limits, Branding, Datenschutz, Backups und Meldungen</p></div><a class="btn btn-primary" href="management/">Öffnen</a></div></section>
 <?php endif; ?>
 </main></div></div>
 

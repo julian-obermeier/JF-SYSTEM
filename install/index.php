@@ -17,6 +17,7 @@ $requirements = [
     'PDO' => extension_loaded('pdo'),
     'PDO MySQL' => extension_loaded('pdo_mysql'),
     'mbstring' => extension_loaded('mbstring'),
+    'fileinfo' => extension_loaded('fileinfo'),
     'config/ beschreibbar' => is_writable($root . '/config'),
     'storage/ beschreibbar' => is_writable($root . '/storage'),
 ];
@@ -63,6 +64,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             foreach (array_filter(array_map('trim', explode(';', (string) $schema))) as $statement) {
                 $pdo->exec($statement);
             }
+            foreach (['004_saas_platform.sql','005_saas_operations.sql','006_tenant_management.sql'] as $migrationFile) {
+                $sql = file_get_contents($root . '/database/migrations/' . $migrationFile);
+                foreach (array_filter(array_map('trim', explode(';', (string) $sql))) as $statement) $pdo->exec($statement);
+            }
 
             $pdo->beginTransaction();
             $slugSource = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT', $organization) : $organization;
@@ -76,6 +81,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  VALUES (?, ?, ?, ?, ?, "admin", 1)'
             );
             $stmt->execute([$tenantId, $firstName, $lastName, $email, password_hash($password, PASSWORD_DEFAULT)]);
+
+            $plans = [
+                ['free','Free','Für kleine Jugendfeuerwehren zum Einstieg.',0,0,50,5,250],
+                ['standard','Standard','Die vollständige Basisverwaltung.',9.90,99,250,15,2048],
+                ['professional','Professional','Mehr Automatisierung und Auswertungen.',19.90,199,1000,50,10240],
+                ['enterprise','Enterprise','Individuelle Limits und Betreuung.',49.90,499,null,null,51200],
+            ];
+            $planStmt=$pdo->prepare('INSERT INTO saas_plans (plan_key,name,description,monthly_price,yearly_price,member_limit,user_limit,storage_limit_mb) VALUES (?,?,?,?,?,?,?,?)');
+            foreach($plans as $plan)$planStmt->execute($plan);
+            $enterpriseId=(int)$pdo->query("SELECT id FROM saas_plans WHERE plan_key='enterprise'")->fetchColumn();
+            $today=date('Y-m-d');
+            $pdo->prepare("INSERT INTO saas_subscriptions (tenant_id,plan_id,status_name,billing_cycle,starts_at,current_period_start) VALUES (?,?,'active','manual',?,?)")->execute([$tenantId,$enterpriseId,$today,$today]);
+            $pdo->prepare('INSERT INTO saas_tenant_settings (tenant_id,display_name,support_email) VALUES (?,?,?)')->execute([$tenantId,$organization,$email]);
+            $migrationStmt=$pdo->prepare('INSERT INTO schema_migrations (migration_key) VALUES (?)');
+            foreach(['002-member-records-events-responses','003-member-documents','004-saas-platform','005-saas-operations','006-tenant-management'] as $migrationKey)$migrationStmt->execute([$migrationKey]);
 
             $qualifications = [
                 ['Jugendflamme Stufe 1', 'Jugendflamme'],
