@@ -142,7 +142,6 @@ function initials(string $firstName, string $lastName): string
 function asset_url(string $path): string
 {
     $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
-    $base = rtrim(dirname($script), '/.');
     $publicRoot = realpath(APP_ROOT . '/public');
     $documentRoot = realpath((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''));
 
@@ -153,8 +152,14 @@ function asset_url(string $path): string
         && $documentRoot !== false
         && rtrim($documentRoot, DIRECTORY_SEPARATOR) === rtrim($publicRoot, DIRECTORY_SEPARATOR);
 
-    if (!$publicIsDocumentRoot && !str_contains($script, '/public/')) {
-        $base .= '/public';
+    if ($publicIsDocumentRoot) {
+        // Bei Unterseiten wie /management/ liegen Assets weiterhin direkt unter /assets/.
+        $base = '';
+    } elseif (($publicPosition = strpos($script, '/public/')) !== false) {
+        // Domain zeigt auf den Projektordner; der aufrufbare Webpfad enthält /public/.
+        $base = substr($script, 0, $publicPosition) . '/public';
+    } else {
+        $base = rtrim(dirname($script), '/.') . '/public';
     }
 
     $relativePath = ltrim($path, '/');
