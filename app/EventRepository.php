@@ -56,11 +56,11 @@ final class EventRepository
                     COALESCE(er.response_status, \'open\') AS response_status,
                     er.responded_at
              FROM members m
-             LEFT JOIN event_responses er ON er.member_id=m.id AND er.event_id=:event AND er.tenant_id=:tenant
-             WHERE m.tenant_id=:tenant AND m.status_name=\'active\'
+             LEFT JOIN event_responses er ON er.member_id=m.id AND er.event_id=:event AND er.tenant_id=:tenant_response
+             WHERE m.tenant_id=:tenant_member AND m.status_name=\'active\'
              ORDER BY m.last_name, m.first_name'
         );
-        $statement->execute(['tenant' => $this->tenant->id(), 'event' => $eventId]);
+        $statement->execute(['tenant_response' => $this->tenant->id(), 'tenant_member' => $this->tenant->id(), 'event' => $eventId]);
         return $statement->fetchAll();
     }
 
