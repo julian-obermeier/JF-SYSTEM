@@ -84,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isCurrent) {
             $messages[] = 'Verantwortlichen-Zuordnung ergänzt';
         }
 
-        $migration = file_get_contents(dirname(__DIR__) . '/database/migrations/002_member_records_events_responses.sql');
+        $migration = file_get_contents(dirname(__DIR__) . '/database/migrations/002_member_records_and_responses.sql');
         preg_match_all('/CREATE TABLE\s+([a-z_]+)\s*\(.*?\) ENGINE=InnoDB.*?;/si', (string) $migration, $matches);
         foreach ($matches[0] as $createSql) {
             $createSql = preg_replace('/CREATE TABLE\s+/i', 'CREATE TABLE IF NOT EXISTS ', $createSql, 1);
