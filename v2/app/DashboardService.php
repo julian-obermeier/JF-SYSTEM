@@ -28,18 +28,14 @@ final class DashboardService
         );
         $events->execute(['tenant' => $tenantId]);
 
+        // SUBSTR funktioniert mit MySQL/MariaDB und SQLite gleichermaßen.
+        // So wird der Dashboard-Aufbau nicht durch eine treiberspezifische
+        // Datumsfunktion abgebrochen.
         $birthdays = $this->db->prepare(
             'SELECT first_name,last_name,birth_date FROM members
              WHERE tenant_id=:tenant AND status_name=\'active\' AND birth_date IS NOT NULL
-             ORDER BY strftime(\'%m-%d\', birth_date) LIMIT 3'
+             ORDER BY SUBSTR(birth_date, 6, 5) LIMIT 3'
         );
-        if ($this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
-            $birthdays = $this->db->prepare(
-                'SELECT first_name,last_name,birth_date FROM members
-                 WHERE tenant_id=:tenant AND status_name=\'active\' AND birth_date IS NOT NULL
-                 ORDER BY DATE_FORMAT(birth_date, \'%m-%d\') LIMIT 3'
-            );
-        }
         $birthdays->execute(['tenant' => $tenantId]);
 
         return [
