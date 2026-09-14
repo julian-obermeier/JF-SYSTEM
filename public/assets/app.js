@@ -7,12 +7,16 @@
     button.addEventListener('click', () => {
       const dialog = document.getElementById(button.dataset.dialogOpen);
       if (!dialog) return;
+      dialog.querySelector('form')?.reset();
+      dialog.querySelectorAll('input[type="hidden"][name="id"]').forEach((field) => { field.value = ''; });
       if (button.dataset.payload) {
         try {
           const payload = JSON.parse(button.dataset.payload);
           Object.entries(payload).forEach(([key, value]) => {
             const field = dialog.querySelector('[name="' + key + '"]');
-            if (field) field.value = value ?? '';
+            if (!field) return;
+            if (field.type === 'checkbox') field.checked = Boolean(Number(value));
+            else field.value = value ?? '';
           });
         } catch (_) {}
       }

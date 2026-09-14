@@ -39,6 +39,14 @@ CREATE TABLE members (
     status_name ENUM('active','paused','left') NOT NULL DEFAULT 'active',
     email VARCHAR(190) NULL,
     phone VARCHAR(50) NULL,
+    address_street VARCHAR(190) NULL,
+    postal_code VARCHAR(20) NULL,
+    city VARCHAR(120) NULL,
+    school_name VARCHAR(180) NULL,
+    shirt_size VARCHAR(20) NULL,
+    pants_size VARCHAR(20) NULL,
+    shoe_size VARCHAR(20) NULL,
+    pickup_authorized TINYINT(1) NOT NULL DEFAULT 0,
     emergency_name VARCHAR(180) NULL,
     emergency_phone VARCHAR(50) NULL,
     medical_notes TEXT NULL,
@@ -59,12 +67,20 @@ CREATE TABLE events (
     ends_at DATETIME NOT NULL,
     location_name VARCHAR(180) NULL,
     description_text TEXT NULL,
+    learning_goals TEXT NULL,
+    material_needed TEXT NULL,
+    max_participants SMALLINT UNSIGNED NULL,
+    response_deadline DATETIME NULL,
+    reminder_at DATETIME NULL,
+    recurrence_rule ENUM('none','weekly','biweekly','monthly') NOT NULL DEFAULT 'none',
     status_name ENUM('draft','published','cancelled','completed') NOT NULL DEFAULT 'published',
+    leader_id BIGINT UNSIGNED NULL,
     created_by BIGINT UNSIGNED NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     KEY events_tenant_start_idx (tenant_id, starts_at),
     CONSTRAINT events_tenant_fk FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT events_leader_fk FOREIGN KEY (leader_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT events_creator_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -83,6 +99,79 @@ CREATE TABLE attendance (
     CONSTRAINT attendance_event_fk FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
     CONSTRAINT attendance_member_fk FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
     CONSTRAINT attendance_user_fk FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE member_guardians (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    member_id BIGINT UNSIGNED NOT NULL,
+    full_name VARCHAR(180) NOT NULL,
+    relationship_name VARCHAR(80) NULL,
+    email VARCHAR(190) NULL,
+    phone VARCHAR(50) NULL,
+    is_primary TINYINT(1) NOT NULL DEFAULT 0,
+    is_emergency_contact TINYINT(1) NOT NULL DEFAULT 1,
+    is_pickup_authorized TINYINT(1) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY guardians_tenant_member_idx (tenant_id, member_id),
+    CONSTRAINT guardians_tenant_fk FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT guardians_member_fk FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE member_consents (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    member_id BIGINT UNSIGNED NOT NULL,
+    consent_type ENUM('privacy','photo','swimming','trip','pickup','medical','other') NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    consent_status ENUM('open','granted','declined','expired','revoked') NOT NULL DEFAULT 'open',
+    granted_at DATE NULL,
+    expires_at DATE NULL,
+    document_reference VARCHAR(255) NULL,
+    note_text VARCHAR(500) NULL,
+    updated_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY consents_tenant_member_idx (tenant_id, member_id),
+    KEY consents_expiry_idx (tenant_id, expires_at),
+    CONSTRAINT consents_tenant_fk FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT consents_member_fk FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
+    CONSTRAINT consents_user_fk FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE event_responses (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    event_id BIGINT UNSIGNED NOT NULL,
+    member_id BIGINT UNSIGNED NOT NULL,
+    response_status ENUM('yes','no','maybe','open') NOT NULL DEFAULT 'open',
+    note_text VARCHAR(500) NULL,
+    responded_at DATETIME NULL,
+    recorded_by BIGINT UNSIGNED NULL,
+    UNIQUE KEY responses_event_member_unique (event_id, member_id),
+    KEY responses_tenant_idx (tenant_id),
+    CONSTRAINT responses_tenant_fk FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT responses_event_fk FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT responses_member_fk FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
+    CONSTRAINT responses_user_fk FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE event_templates (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    tenant_id BIGINT UNSIGNED NOT NULL,
+    title VARCHAR(180) NOT NULL,
+    event_type ENUM('practice','meeting','trip','competition','other') NOT NULL DEFAULT 'practice',
+    duration_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 90,
+    location_name VARCHAR(180) NULL,
+    description_text TEXT NULL,
+    learning_goals TEXT NULL,
+    material_needed TEXT NULL,
+    max_participants SMALLINT UNSIGNED NULL,
+    created_by BIGINT UNSIGNED NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY templates_tenant_idx (tenant_id),
+    CONSTRAINT templates_tenant_fk FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT templates_user_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE qualifications (
@@ -123,6 +212,11 @@ CREATE TABLE audit_logs (
     KEY audit_tenant_created_idx (tenant_id, created_at),
     CONSTRAINT audit_tenant_fk FOREIGN KEY (tenant_id) REFERENCES organizations(id) ON DELETE CASCADE,
     CONSTRAINT audit_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE schema_migrations (
+    migration_key VARCHAR(100) PRIMARY KEY,
+    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE login_attempts (

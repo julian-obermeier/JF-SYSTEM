@@ -77,40 +77,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($firstName === '' || $lastName === '') {
                 throw new RuntimeException('Vor- und Nachname sind Pflichtfelder.');
             }
-            $values = [
-                $firstName,
-                $lastName,
-                ($_POST['birth_date'] ?? '') ?: null,
-                ($_POST['entry_date'] ?? '') ?: null,
-                in_array($_POST['member_type'] ?? '', ['youth', 'staff'], true) ? $_POST['member_type'] : 'youth',
-                in_array($_POST['status_name'] ?? '', ['active', 'paused', 'left'], true) ? $_POST['status_name'] : 'active',
-                trim((string) ($_POST['email'] ?? '')) ?: null,
-                trim((string) ($_POST['phone'] ?? '')) ?: null,
-                trim((string) ($_POST['emergency_name'] ?? '')) ?: null,
-                trim((string) ($_POST['emergency_phone'] ?? '')) ?: null,
-                trim((string) ($_POST['medical_notes'] ?? '')) ?: null,
-                trim((string) ($_POST['notes_text'] ?? '')) ?: null,
+
+            $fields = [
+                'first_name' => $firstName,
+                'last_name' => $lastName,
+                'birth_date' => ($_POST['birth_date'] ?? '') ?: null,
+                'entry_date' => ($_POST['entry_date'] ?? '') ?: null,
+                'member_type' => in_array($_POST['member_type'] ?? '', ['youth', 'staff'], true) ? $_POST['member_type'] : 'youth',
+                'status_name' => in_array($_POST['status_name'] ?? '', ['active', 'paused', 'left'], true) ? $_POST['status_name'] : 'active',
+                'email' => trim((string) ($_POST['email'] ?? '')) ?: null,
+                'phone' => trim((string) ($_POST['phone'] ?? '')) ?: null,
+                'address_street' => trim((string) ($_POST['address_street'] ?? '')) ?: null,
+                'postal_code' => trim((string) ($_POST['postal_code'] ?? '')) ?: null,
+                'city' => trim((string) ($_POST['city'] ?? '')) ?: null,
+                'school_name' => trim((string) ($_POST['school_name'] ?? '')) ?: null,
+                'shirt_size' => trim((string) ($_POST['shirt_size'] ?? '')) ?: null,
+                'pants_size' => trim((string) ($_POST['pants_size'] ?? '')) ?: null,
+                'shoe_size' => trim((string) ($_POST['shoe_size'] ?? '')) ?: null,
+                'pickup_authorized' => isset($_POST['pickup_authorized']) ? 1 : 0,
+                'emergency_name' => trim((string) ($_POST['emergency_name'] ?? '')) ?: null,
+                'emergency_phone' => trim((string) ($_POST['emergency_phone'] ?? '')) ?: null,
+                'medical_notes' => trim((string) ($_POST['medical_notes'] ?? '')) ?: null,
+                'notes_text' => trim((string) ($_POST['notes_text'] ?? '')) ?: null,
             ];
 
             if ($id > 0) {
-                $stmt = db()->prepare(
-                    'UPDATE members SET first_name=?, last_name=?, birth_date=?, entry_date=?, member_type=?, status_name=?,
-                     email=?, phone=?, emergency_name=?, emergency_phone=?, medical_notes=?, notes_text=?
-                     WHERE id=? AND tenant_id=?'
-                );
-                $stmt->execute([...$values, $id, $tenantId]);
-                audit('update', 'members', $id, 'Mitglied aktualisiert: ' . $firstName . ' ' . $lastName);
+                $assignments = implode(', ', array_map(static fn(string $name): string => $name . '=?', array_keys($fields)));
+                $stmt = db()->prepare('UPDATE members SET ' . $assignments . ' WHERE id=? AND tenant_id=?');
+                $stmt->execute([...array_values($fields), $id, $tenantId]);
+                audit('update', 'members', $id, 'Mitgliedsakte aktualisiert: ' . $firstName . ' ' . $lastName);
             } else {
-                $stmt = db()->prepare(
-                    'INSERT INTO members (first_name,last_name,birth_date,entry_date,member_type,status_name,email,phone,emergency_name,emergency_phone,medical_notes,notes_text,tenant_id)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
-                );
-                $stmt->execute([...$values, $tenantId]);
+                $columns = implode(',', array_keys($fields));
+                $placeholders = implode(',', array_fill(0, count($fields), '?'));
+                $stmt = db()->prepare('INSERT INTO members (' . $columns . ',tenant_id) VALUES (' . $placeholders . ',?)');
+                $stmt->execute([...array_values($fields), $tenantId]);
                 $id = (int) db()->lastInsertId();
                 audit('create', 'members', $id, 'Mitglied angelegt: ' . $firstName . ' ' . $lastName);
             }
-            flash('success', 'Mitglied wurde gespeichert.');
-            redirect('?page=members');
+            flash('success', 'Mitgliedsakte wurde gespeichert.');
+            redirect('?page=members&member_id=' . $id);
         }
 
         if ($action === 'member_delete') {
@@ -132,27 +137,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (strtotime($end) <= strtotime($start)) {
                 throw new RuntimeException('Das Ende muss nach dem Beginn liegen.');
             }
-            $values = [
-                $title,
-                in_array($_POST['event_type'] ?? '', ['practice', 'meeting', 'trip', 'competition', 'other'], true) ? $_POST['event_type'] : 'practice',
-                date('Y-m-d H:i:s', strtotime($start)),
-                date('Y-m-d H:i:s', strtotime($end)),
-                trim((string) ($_POST['location_name'] ?? '')) ?: null,
-                trim((string) ($_POST['description_text'] ?? '')) ?: null,
-                in_array($_POST['status_name'] ?? '', ['draft', 'published', 'cancelled', 'completed'], true) ? $_POST['status_name'] : 'published',
+
+            $leaderId = (int) ($_POST['leader_id'] ?? 0) ?: null;
+            if ($leaderId !== null) {
+                $leaderCheck = db()->prepare("SELECT id FROM users WHERE id=? AND tenant_id=? AND is_active=1 AND role IN ('admin','leader','staff')");
+                $leaderCheck->execute([$leaderId, $tenantId]);
+                if (!$leaderCheck->fetchColumn()) {
+                    throw new RuntimeException('Die ausgewählte Leitung ist nicht verfügbar.');
+                }
+            }
+
+            $fields = [
+                'title' => $title,
+                'event_type' => in_array($_POST['event_type'] ?? '', ['practice', 'meeting', 'trip', 'competition', 'other'], true) ? $_POST['event_type'] : 'practice',
+                'starts_at' => date('Y-m-d H:i:s', strtotime($start)),
+                'ends_at' => date('Y-m-d H:i:s', strtotime($end)),
+                'location_name' => trim((string) ($_POST['location_name'] ?? '')) ?: null,
+                'description_text' => trim((string) ($_POST['description_text'] ?? '')) ?: null,
+                'learning_goals' => trim((string) ($_POST['learning_goals'] ?? '')) ?: null,
+                'material_needed' => trim((string) ($_POST['material_needed'] ?? '')) ?: null,
+                'max_participants' => (int) ($_POST['max_participants'] ?? 0) ?: null,
+                'response_deadline' => ($_POST['response_deadline'] ?? '') ? date('Y-m-d H:i:s', strtotime((string) $_POST['response_deadline'])) : null,
+                'reminder_at' => ($_POST['reminder_at'] ?? '') ? date('Y-m-d H:i:s', strtotime((string) $_POST['reminder_at'])) : null,
+                'recurrence_rule' => in_array($_POST['recurrence_rule'] ?? '', ['none', 'weekly', 'biweekly', 'monthly'], true) ? $_POST['recurrence_rule'] : 'none',
+                'status_name' => in_array($_POST['status_name'] ?? '', ['draft', 'published', 'cancelled', 'completed'], true) ? $_POST['status_name'] : 'published',
+                'leader_id' => $leaderId,
             ];
 
             if ($id > 0) {
-                $stmt = db()->prepare('UPDATE events SET title=?,event_type=?,starts_at=?,ends_at=?,location_name=?,description_text=?,status_name=? WHERE id=? AND tenant_id=?');
-                $stmt->execute([...$values, $id, $tenantId]);
+                $assignments = implode(', ', array_map(static fn(string $name): string => $name . '=?', array_keys($fields)));
+                $stmt = db()->prepare('UPDATE events SET ' . $assignments . ' WHERE id=? AND tenant_id=?');
+                $stmt->execute([...array_values($fields), $id, $tenantId]);
                 audit('update', 'events', $id, 'Dienst aktualisiert: ' . $title);
             } else {
-                $stmt = db()->prepare('INSERT INTO events (title,event_type,starts_at,ends_at,location_name,description_text,status_name,tenant_id,created_by) VALUES (?,?,?,?,?,?,?,?,?)');
-                $stmt->execute([...$values, $tenantId, (int) $user['id']]);
+                $columns = implode(',', array_keys($fields));
+                $placeholders = implode(',', array_fill(0, count($fields), '?'));
+                $stmt = db()->prepare('INSERT INTO events (' . $columns . ',tenant_id,created_by) VALUES (' . $placeholders . ',?,?)');
+                $stmt->execute([...array_values($fields), $tenantId, (int) $user['id']]);
                 $id = (int) db()->lastInsertId();
                 audit('create', 'events', $id, 'Dienst angelegt: ' . $title);
+
+                $recurrence = $fields['recurrence_rule'];
+                if ($recurrence !== 'none') {
+                    $interval = ['weekly' => '+1 week', 'biweekly' => '+2 weeks', 'monthly' => '+1 month'][$recurrence];
+                    $currentStart = new DateTimeImmutable($fields['starts_at']);
+                    $currentEnd = new DateTimeImmutable($fields['ends_at']);
+                    $copy = db()->prepare(
+                        'INSERT INTO events (title,event_type,starts_at,ends_at,location_name,description_text,learning_goals,material_needed,max_participants,response_deadline,reminder_at,recurrence_rule,status_name,leader_id,tenant_id,created_by)
+                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+                    );
+                    for ($occurrence = 1; $occurrence <= 5; $occurrence++) {
+                        $currentStart = $currentStart->modify($interval);
+                        $currentEnd = $currentEnd->modify($interval);
+                        $copy->execute([
+                            $fields['title'], $fields['event_type'], $currentStart->format('Y-m-d H:i:s'), $currentEnd->format('Y-m-d H:i:s'),
+                            $fields['location_name'], $fields['description_text'], $fields['learning_goals'], $fields['material_needed'],
+                            $fields['max_participants'], null, null, $recurrence, $fields['status_name'], $fields['leader_id'], $tenantId, (int) $user['id']
+                        ]);
+                    }
+                }
             }
-            flash('success', 'Dienst wurde gespeichert.');
+            flash('success', 'Dienstplanung wurde gespeichert.');
             redirect('?page=events');
         }
 
@@ -162,6 +207,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit('delete', 'events', $id, 'Dienst gelöscht');
             flash('success', 'Dienst wurde gelöscht.');
             redirect('?page=events');
+        }
+
+        if ($action === 'guardian_save') {
+            $memberId = (int) ($_POST['member_id'] ?? 0);
+            $check = db()->prepare('SELECT id FROM members WHERE id=? AND tenant_id=?');
+            $check->execute([$memberId, $tenantId]);
+            if (!$check->fetchColumn()) {
+                throw new RuntimeException('Mitglied wurde nicht gefunden.');
+            }
+            $fullName = trim((string) ($_POST['full_name'] ?? ''));
+            if ($fullName === '') {
+                throw new RuntimeException('Der Name des Sorgeberechtigten ist erforderlich.');
+            }
+            $stmt = db()->prepare(
+                'INSERT INTO member_guardians (tenant_id,member_id,full_name,relationship_name,email,phone,is_primary,is_emergency_contact,is_pickup_authorized)
+                 VALUES (?,?,?,?,?,?,?,?,?)'
+            );
+            $stmt->execute([
+                $tenantId, $memberId, $fullName, trim((string) ($_POST['relationship_name'] ?? '')) ?: null,
+                trim((string) ($_POST['guardian_email'] ?? '')) ?: null, trim((string) ($_POST['guardian_phone'] ?? '')) ?: null,
+                (int) ($_POST['is_primary'] ?? 0), (int) ($_POST['is_emergency_contact'] ?? 0), (int) ($_POST['is_pickup_authorized'] ?? 0)
+            ]);
+            audit('create', 'member_guardians', (int) db()->lastInsertId(), 'Sorgeberechtigten hinterlegt');
+            flash('success', 'Sorgeberechtigter wurde gespeichert.');
+            redirect('?page=members&member_id=' . $memberId);
+        }
+
+        if ($action === 'guardian_delete') {
+            $id = (int) ($_POST['id'] ?? 0);
+            $memberId = (int) ($_POST['member_id'] ?? 0);
+            db()->prepare('DELETE FROM member_guardians WHERE id=? AND member_id=? AND tenant_id=?')->execute([$id, $memberId, $tenantId]);
+            audit('delete', 'member_guardians', $id, 'Sorgeberechtigten entfernt');
+            flash('success', 'Kontakt wurde entfernt.');
+            redirect('?page=members&member_id=' . $memberId);
+        }
+
+        if ($action === 'consent_save') {
+            $memberId = (int) ($_POST['member_id'] ?? 0);
+            $check = db()->prepare('SELECT id FROM members WHERE id=? AND tenant_id=?');
+            $check->execute([$memberId, $tenantId]);
+            if (!$check->fetchColumn()) {
+                throw new RuntimeException('Mitglied wurde nicht gefunden.');
+            }
+            $type = in_array($_POST['consent_type'] ?? '', ['privacy','photo','swimming','trip','pickup','medical','other'], true) ? $_POST['consent_type'] : 'other';
+            $status = in_array($_POST['consent_status'] ?? '', ['open','granted','declined','expired','revoked'], true) ? $_POST['consent_status'] : 'open';
+            $title = trim((string) ($_POST['consent_title'] ?? ''));
+            if ($title === '') {
+                throw new RuntimeException('Die Bezeichnung der Einwilligung ist erforderlich.');
+            }
+            $stmt = db()->prepare(
+                'INSERT INTO member_consents (tenant_id,member_id,consent_type,title,consent_status,granted_at,expires_at,document_reference,note_text,updated_by)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)'
+            );
+            $stmt->execute([
+                $tenantId, $memberId, $type, $title, $status, ($_POST['granted_at'] ?? '') ?: null,
+                ($_POST['expires_at'] ?? '') ?: null, trim((string) ($_POST['document_reference'] ?? '')) ?: null,
+                trim((string) ($_POST['consent_note'] ?? '')) ?: null, (int) $user['id']
+            ]);
+            audit('create', 'member_consents', (int) db()->lastInsertId(), 'Einwilligung dokumentiert: ' . $title);
+            flash('success', 'Einwilligung wurde dokumentiert.');
+            redirect('?page=members&member_id=' . $memberId);
+        }
+
+        if ($action === 'consent_delete') {
+            $id = (int) ($_POST['id'] ?? 0);
+            $memberId = (int) ($_POST['member_id'] ?? 0);
+            db()->prepare('DELETE FROM member_consents WHERE id=? AND member_id=? AND tenant_id=?')->execute([$id, $memberId, $tenantId]);
+            audit('delete', 'member_consents', $id, 'Einwilligung entfernt');
+            flash('success', 'Einwilligung wurde entfernt.');
+            redirect('?page=members&member_id=' . $memberId);
+        }
+
+        if ($action === 'response_save') {
+            $eventId = (int) ($_POST['event_id'] ?? 0);
+            $check = db()->prepare('SELECT id FROM events WHERE id=? AND tenant_id=?');
+            $check->execute([$eventId, $tenantId]);
+            if (!$check->fetchColumn()) {
+                throw new RuntimeException('Der ausgewählte Dienst wurde nicht gefunden.');
+            }
+            $stmt = db()->prepare(
+                'INSERT INTO event_responses (tenant_id,event_id,member_id,response_status,responded_at,recorded_by)
+                 VALUES (?,?,?,?,NOW(),?)
+                 ON DUPLICATE KEY UPDATE response_status=VALUES(response_status), responded_at=NOW(), recorded_by=VALUES(recorded_by)'
+            );
+            $memberCheck = db()->prepare('SELECT id FROM members WHERE id=? AND tenant_id=? AND status_name=\'active\'');
+            foreach ((array) ($_POST['responses'] ?? []) as $memberId => $status) {
+                $memberId = (int) $memberId;
+                $memberCheck->execute([$memberId, $tenantId]);
+                if ($memberCheck->fetchColumn() && in_array($status, ['yes', 'no', 'maybe', 'open'], true)) {
+                    $stmt->execute([$tenantId, $eventId, $memberId, $status, (int) $user['id']]);
+                }
+            }
+            audit('update', 'event_responses', $eventId, 'Zu- und Absagen erfasst');
+            flash('success', 'Rückmeldungen wurden gespeichert.');
+            redirect('?page=attendance&event_id=' . $eventId);
         }
 
         if ($action === 'attendance_save') {
@@ -177,9 +317,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  VALUES (?,?,?,?,?)
                  ON DUPLICATE KEY UPDATE attendance_status=VALUES(attendance_status), recorded_by=VALUES(recorded_by)'
             );
+            $memberCheck = db()->prepare('SELECT id FROM members WHERE id=? AND tenant_id=? AND status_name=\'active\'');
             foreach ((array) ($_POST['attendance'] ?? []) as $memberId => $status) {
-                if (in_array($status, ['present', 'excused', 'absent', 'unknown'], true)) {
-                    $stmt->execute([$tenantId, $eventId, (int) $memberId, $status, (int) $user['id']]);
+                $memberId = (int) $memberId;
+                $memberCheck->execute([$memberId, $tenantId]);
+                if ($memberCheck->fetchColumn() && in_array($status, ['present', 'excused', 'absent', 'unknown'], true)) {
+                    $stmt->execute([$tenantId, $eventId, $memberId, $status, (int) $user['id']]);
                 }
             }
             audit('update', 'attendance', $eventId, 'Anwesenheiten erfasst');
@@ -241,6 +384,9 @@ if (Auth::isAdmin()) {
     $navItems['users'] = ['shield', 'Benutzer & Rollen'];
     $navItems['settings'] = ['settings', 'Einstellungen'];
 }
+$leaderStmt = db()->prepare("SELECT id,first_name,last_name FROM users WHERE tenant_id=? AND is_active=1 AND role IN ('admin','leader','staff') ORDER BY last_name,first_name");
+$leaderStmt->execute([$tenantId]);
+$leaders = $leaderStmt->fetchAll();
 ?><!doctype html>
 <html lang="de">
 <head>
@@ -280,6 +426,9 @@ if (Auth::isAdmin()) {
     $memberCount = (int) db()->query("SELECT COUNT(*) FROM members WHERE tenant_id={$tenantId} AND member_type='youth' AND status_name='active'")->fetchColumn();
     $staffCount = (int) db()->query("SELECT COUNT(*) FROM members WHERE tenant_id={$tenantId} AND member_type='staff' AND status_name='active'")->fetchColumn();
     $eventCount = (int) db()->query("SELECT COUNT(*) FROM events WHERE tenant_id={$tenantId} AND starts_at>=NOW() AND status_name='published'")->fetchColumn();
+    $consentStmt = db()->prepare("SELECT COUNT(*) FROM member_consents WHERE tenant_id=? AND (consent_status<>'granted' OR (expires_at IS NOT NULL AND expires_at<CURDATE()))");
+    $consentStmt->execute([$tenantId]);
+    $consentAlertCount = (int) $consentStmt->fetchColumn();
     $rateStmt = db()->prepare("SELECT ROUND(100*SUM(a.attendance_status='present')/NULLIF(COUNT(*),0)) FROM attendance a WHERE a.tenant_id=?");
     $rateStmt->execute([$tenantId]);
     $attendanceRate = (int) ($rateStmt->fetchColumn() ?: 0);
@@ -295,6 +444,7 @@ if (Auth::isAdmin()) {
 <div class="metric"><div class="metric-icon"><?= icon('shield') ?></div><div><strong><?= $staffCount ?></strong><span>Betreuer</span></div></div>
 <div class="metric"><div class="metric-icon"><?= icon('check') ?></div><div><strong><?= $attendanceRate ?> %</strong><span>Anwesenheit gesamt</span></div></div>
 <div class="metric"><div class="metric-icon"><?= icon('calendar') ?></div><div><strong><?= $eventCount ?></strong><span>kommende Dienste</span></div></div>
+<div class="metric <?= $consentAlertCount ? 'metric-alert' : '' ?>"><div class="metric-icon"><?= icon('file') ?></div><div><strong><?= $consentAlertCount ?></strong><span>Einwilligungen prüfen</span></div></div>
 </div>
 <div class="dashboard-grid">
 <section class="panel"><div class="panel-head"><h2>Nächster Dienst</h2><a class="btn btn-secondary btn-small" href="?page=events">Alle anzeigen</a></div><div class="panel-body">
@@ -308,38 +458,94 @@ if (Auth::isAdmin()) {
 </div></section></div>
 
 <?php elseif ($page === 'members'):
-    $stmt = db()->prepare('SELECT * FROM members WHERE tenant_id=? ORDER BY status_name, last_name, first_name');
+    $stmt = db()->prepare("SELECT m.*,
+        (SELECT COUNT(*) FROM member_guardians g WHERE g.member_id=m.id) AS guardian_count,
+        (SELECT COUNT(*) FROM member_consents c WHERE c.member_id=m.id AND (c.consent_status<>'granted' OR (c.expires_at IS NOT NULL AND c.expires_at<CURDATE()))) AS consent_alerts
+        FROM members m WHERE m.tenant_id=? ORDER BY m.status_name,m.last_name,m.first_name");
     $stmt->execute([$tenantId]);
     $members = $stmt->fetchAll();
+    $selectedMemberId = (int) ($_GET['member_id'] ?? 0);
+    $selectedMember = null; $guardians = []; $consents = [];
+    if ($selectedMemberId) {
+        $detailStmt = db()->prepare('SELECT * FROM members WHERE id=? AND tenant_id=?');
+        $detailStmt->execute([$selectedMemberId,$tenantId]);
+        $selectedMember = $detailStmt->fetch() ?: null;
+        if ($selectedMember) {
+            $gStmt = db()->prepare('SELECT * FROM member_guardians WHERE member_id=? AND tenant_id=? ORDER BY is_primary DESC,full_name');
+            $gStmt->execute([$selectedMemberId,$tenantId]); $guardians = $gStmt->fetchAll();
+            $cStmt = db()->prepare('SELECT * FROM member_consents WHERE member_id=? AND tenant_id=? ORDER BY expires_at IS NULL,expires_at,consent_type');
+            $cStmt->execute([$selectedMemberId,$tenantId]); $consents = $cStmt->fetchAll();
+        }
+    }
 ?>
-<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Mitglied</th><th>Art</th><th>Geburtsdatum</th><th>Eintritt</th><th>Status</th><th></th></tr></thead><tbody>
+<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Mitglied</th><th>Kontakt & Anschrift</th><th>Sorgeberechtigte</th><th>Einwilligungen</th><th>Status</th><th></th></tr></thead><tbody>
 <?php if (!$members): ?><tr><td colspan="6"><div class="empty">Noch keine Mitglieder angelegt.</div></td></tr><?php endif; ?>
 <?php foreach ($members as $member):
 $payload = e(json_encode([
-'id'=>$member['id'],'first_name'=>$member['first_name'],'last_name'=>$member['last_name'],'birth_date'=>$member['birth_date'],'entry_date'=>$member['entry_date'],'member_type'=>$member['member_type'],'status_name'=>$member['status_name'],'email'=>$member['email'],'phone'=>$member['phone'],'emergency_name'=>$member['emergency_name'],'emergency_phone'=>$member['emergency_phone'],'medical_notes'=>$member['medical_notes'],'notes_text'=>$member['notes_text']
+'id'=>$member['id'],'first_name'=>$member['first_name'],'last_name'=>$member['last_name'],'birth_date'=>$member['birth_date'],'entry_date'=>$member['entry_date'],'member_type'=>$member['member_type'],'status_name'=>$member['status_name'],'email'=>$member['email'],'phone'=>$member['phone'],'address_street'=>$member['address_street'],'postal_code'=>$member['postal_code'],'city'=>$member['city'],'school_name'=>$member['school_name'],'shirt_size'=>$member['shirt_size'],'pants_size'=>$member['pants_size'],'shoe_size'=>$member['shoe_size'],'pickup_authorized'=>$member['pickup_authorized'],'emergency_name'=>$member['emergency_name'],'emergency_phone'=>$member['emergency_phone'],'medical_notes'=>$member['medical_notes'],'notes_text'=>$member['notes_text']
 ], JSON_UNESCAPED_UNICODE));
-?><tr data-search-row><td><div class="member-cell"><span class="mini-avatar"><?= e(initials($member['first_name'],$member['last_name'])) ?></span><div><strong><?= e($member['last_name'] . ', ' . $member['first_name']) ?></strong><small><?= e($member['email'] ?: $member['phone'] ?: 'Keine Kontaktdaten') ?></small></div></div></td><td><?= $member['member_type']==='youth'?'Jugendliche/r':'Betreuer/in' ?></td><td><?= e(format_date($member['birth_date'])) ?></td><td><?= e(format_date($member['entry_date'])) ?></td><td><span class="status status-<?= e($member['status_name']) ?>"><?= ['active'=>'Aktiv','paused'=>'Pausiert','left'=>'Ausgetreten'][$member['status_name']] ?></span></td><td><div class="actions">
-<?php if (Auth::canManage()): ?><button class="btn btn-secondary btn-small" data-dialog-open="member-dialog" data-payload="<?= $payload ?>">Bearbeiten</button><form method="post" onsubmit="return confirm('Mitglied wirklich löschen?')"><?= csrf_field() ?><input type="hidden" name="action" value="member_delete"><input type="hidden" name="id" value="<?= (int)$member['id'] ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?>
-</div></td></tr><?php endforeach; ?>
+?>
+<tr><td><strong><?= e($member['last_name'].', '.$member['first_name']) ?></strong><small><?= e(format_date($member['birth_date'])) ?> · <?= $member['member_type']==='staff'?'Betreuung':'Jugend' ?></small></td>
+<td><?= e(trim(($member['address_street'] ?: '').' '.($member['postal_code'] ?: '').' '.($member['city'] ?: '')) ?: '–') ?><small><?= e($member['phone'] ?: $member['email'] ?: 'Kein Kontakt') ?></small></td>
+<td><strong><?= (int)$member['guardian_count'] ?></strong><small>hinterlegt</small></td>
+<td><?php if((int)$member['consent_alerts']): ?><span class="status status-cancelled"><?= (int)$member['consent_alerts'] ?> offen</span><?php else: ?><span class="status status-active">vollständig</span><?php endif; ?></td>
+<td><span class="status status-<?= e($member['status_name']) ?>"><?= e(status_label($member['status_name'])) ?></span></td>
+<td><div class="row-actions"><a class="btn btn-secondary btn-small" href="?page=members&amp;member_id=<?= (int)$member['id'] ?>">Akte öffnen</a><?php if(Auth::canManage()): ?><button class="btn btn-secondary btn-small" data-dialog-open="member-dialog" data-payload="<?= $payload ?>">Bearbeiten</button>
+<form method="post" data-confirm="Mitglied wirklich löschen?"><?= csrf_field() ?><input type="hidden" name="action" value="member_delete"><input type="hidden" name="id" value="<?= (int)$member['id'] ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?></div></td></tr><?php endforeach; ?>
 </tbody></table></div></section>
 
+<?php if($selectedMember): ?>
+<div class="record-grid">
+<section class="panel"><div class="panel-head"><div><p class="eyebrow">Mitgliederakte</p><h2><?= e($selectedMember['first_name'].' '.$selectedMember['last_name']) ?></h2></div><a class="btn btn-secondary btn-small" href="?page=members">Schließen</a></div><div class="panel-body record-summary">
+<div><span>Adresse</span><strong><?= e(trim(($selectedMember['address_street'] ?: '').', '.($selectedMember['postal_code'] ?: '').' '.($selectedMember['city'] ?: ''), ', ') ?: 'Nicht hinterlegt') ?></strong></div>
+<div><span>Schule</span><strong><?= e($selectedMember['school_name'] ?: 'Nicht hinterlegt') ?></strong></div>
+<div><span>Größen</span><strong>Shirt <?= e($selectedMember['shirt_size'] ?: '–') ?> · Hose <?= e($selectedMember['pants_size'] ?: '–') ?> · Schuhe <?= e($selectedMember['shoe_size'] ?: '–') ?></strong></div>
+<div><span>Notfallkontakt</span><strong><?= e($selectedMember['emergency_name'] ?: 'Nicht hinterlegt') ?><?= $selectedMember['emergency_phone'] ? ' · '.e($selectedMember['emergency_phone']) : '' ?></strong></div>
+<?php if(Auth::canManage() && $selectedMember['medical_notes']): ?><div class="record-wide"><span>Medizinische Hinweise</span><strong><?= nl2br(e($selectedMember['medical_notes'])) ?></strong></div><?php endif; ?>
+</div></section>
+
+<section class="panel"><div class="panel-head"><h2>Sorgeberechtigte</h2></div><div class="panel-body">
+<div class="consent-list"><?php foreach($guardians as $guardian): ?><article class="consent-card"><div><strong><?= e($guardian['full_name']) ?></strong><small><?= e($guardian['relationship_name'] ?: 'Kontaktperson') ?><?= $guardian['is_primary'] ? ' · Hauptkontakt' : '' ?><?= $guardian['is_pickup_authorized'] ? ' · Abholberechtigt' : '' ?></small><small><?= e($guardian['phone'] ?: '') ?><?= $guardian['email'] ? ' · '.e($guardian['email']) : '' ?></small></div><?php if(Auth::canManage()): ?><form method="post" data-confirm="Kontakt löschen?"><?= csrf_field() ?><input type="hidden" name="action" value="guardian_delete"><input type="hidden" name="id" value="<?= (int)$guardian['id'] ?>"><input type="hidden" name="member_id" value="<?= $selectedMemberId ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?></article><?php endforeach; ?><?php if(!$guardians): ?><div class="empty">Noch kein Kontakt hinterlegt.</div><?php endif; ?></div>
+<?php if(Auth::canManage()): ?><form method="post" class="form-grid compact-form"><?= csrf_field() ?><input type="hidden" name="action" value="guardian_save"><input type="hidden" name="member_id" value="<?= $selectedMemberId ?>">
+<div class="field"><label>Name *</label><input name="full_name" required></div><div class="field"><label>Beziehung</label><input name="relationship_name" placeholder="z. B. Mutter"></div><div class="field"><label>Telefon</label><input name="guardian_phone"></div><div class="field"><label>E-Mail</label><input name="guardian_email" type="email"></div>
+<div class="field field-full checkbox-row"><label><input type="checkbox" name="is_primary" value="1"> Hauptkontakt</label><label><input type="checkbox" name="is_emergency_contact" value="1"> Notfallkontakt</label><label><input type="checkbox" name="is_pickup_authorized" value="1"> Abholberechtigt</label></div><div class="field field-full"><button class="btn btn-primary">Kontakt hinzufügen</button></div></form><?php endif; ?>
+</div></section>
+
+<section class="panel"><div class="panel-head"><h2>Einwilligungen</h2></div><div class="panel-body">
+<div class="consent-list"><?php foreach($consents as $consent):
+$consentClass = $consent['consent_status']==='granted' && (!$consent['expires_at'] || $consent['expires_at']>=date('Y-m-d')) ? 'active' : 'cancelled';
+?><article class="consent-card"><div><strong><?= e($consent['title']) ?></strong><small><?= e(ucfirst($consent['consent_status'])) ?><?= $consent['expires_at'] ? ' · gültig bis '.e(format_date($consent['expires_at'])) : '' ?></small><?php if($consent['document_reference']): ?><small>Dokument: <?= e($consent['document_reference']) ?></small><?php endif; ?></div><span class="status status-<?= $consentClass ?>"><?= $consentClass==='active'?'OK':'Prüfen' ?></span><?php if(Auth::canManage()): ?><form method="post" data-confirm="Einwilligung löschen?"><?= csrf_field() ?><input type="hidden" name="action" value="consent_delete"><input type="hidden" name="id" value="<?= (int)$consent['id'] ?>"><input type="hidden" name="member_id" value="<?= $selectedMemberId ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?></article><?php endforeach; ?><?php if(!$consents): ?><div class="empty">Noch keine Einwilligungen erfasst.</div><?php endif; ?></div>
+<?php if(Auth::canManage()): ?><form method="post" class="form-grid compact-form"><?= csrf_field() ?><input type="hidden" name="action" value="consent_save"><input type="hidden" name="member_id" value="<?= $selectedMemberId ?>">
+<div class="field"><label>Titel *</label><input name="consent_title" required placeholder="z. B. Fotoerlaubnis"></div><div class="field"><label>Typ</label><select name="consent_type"><option value="photo">Foto/Video</option><option value="privacy">Datenschutz</option><option value="medical">Medizinisch</option><option value="trip">Ausflug</option><option value="other">Sonstiges</option></select></div>
+<div class="field"><label>Status</label><select name="consent_status"><option value="granted">Erteilt</option><option value="open">Offen</option><option value="declined">Abgelehnt</option><option value="revoked">Widerrufen</option></select></div><div class="field"><label>Erteilt am</label><input name="granted_at" type="date"></div><div class="field"><label>Gültig bis</label><input name="expires_at" type="date"></div><div class="field"><label>Dokument/Referenz</label><input name="document_reference"></div><div class="field field-full"><label>Notiz</label><textarea name="consent_note"></textarea></div><div class="field field-full"><button class="btn btn-primary">Einwilligung hinzufügen</button></div></form><?php endif; ?>
+</div></section>
+</div>
+<?php endif; ?>
+
 <?php elseif ($page === 'events'):
-    $stmt = db()->prepare('SELECT * FROM events WHERE tenant_id=? ORDER BY starts_at DESC');
+    $stmt = db()->prepare("SELECT e.*,CONCAT(u.first_name,' ',u.last_name) AS leader_name,
+        (SELECT COUNT(*) FROM event_responses r WHERE r.event_id=e.id AND r.response_status='yes') AS yes_count,
+        (SELECT COUNT(*) FROM event_responses r WHERE r.event_id=e.id AND r.response_status='no') AS no_count,
+        (SELECT COUNT(*) FROM event_responses r WHERE r.event_id=e.id AND r.response_status='maybe') AS maybe_count
+        FROM events e LEFT JOIN users u ON u.id=e.leader_id WHERE e.tenant_id=? ORDER BY e.starts_at DESC");
     $stmt->execute([$tenantId]);
     $events = $stmt->fetchAll();
 ?>
-<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Dienst</th><th>Termin</th><th>Ort</th><th>Art</th><th>Status</th><th></th></tr></thead><tbody>
+<section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Dienst</th><th>Termin & Ort</th><th>Rückmeldungen</th><th>Leitung</th><th>Status</th><th></th></tr></thead><tbody>
 <?php if (!$events): ?><tr><td colspan="6"><div class="empty">Noch keine Dienste oder Übungen angelegt.</div></td></tr><?php endif; ?>
 <?php foreach ($events as $event):
-$payload = e(json_encode(['id'=>$event['id'],'title'=>$event['title'],'event_type'=>$event['event_type'],'starts_at'=>date('Y-m-d\TH:i',strtotime($event['starts_at'])),'ends_at'=>date('Y-m-d\TH:i',strtotime($event['ends_at'])),'location_name'=>$event['location_name'],'description_text'=>$event['description_text'],'status_name'=>$event['status_name']], JSON_UNESCAPED_UNICODE));
-?><tr data-search-row><td><strong><?= e($event['title']) ?></strong><br><small><?= e($event['description_text'] ?: 'Keine Beschreibung') ?></small></td><td><?= e(format_date($event['starts_at'],true)) ?> Uhr</td><td><?= e($event['location_name'] ?: '–') ?></td><td><?= ['practice'=>'Übung','meeting'=>'Besprechung','trip'=>'Ausflug','competition'=>'Wettbewerb','other'=>'Sonstiges'][$event['event_type']] ?></td><td><span class="status status-<?= e($event['status_name']) ?>"><?= ['draft'=>'Entwurf','published'=>'Veröffentlicht','cancelled'=>'Abgesagt','completed'=>'Abgeschlossen'][$event['status_name']] ?></span></td><td><div class="actions">
-<a class="btn btn-secondary btn-small" href="?page=attendance&event_id=<?= (int)$event['id'] ?>">Anwesenheit</a>
-<?php if(Auth::canManage()): ?><button class="btn btn-secondary btn-small" data-dialog-open="event-dialog" data-payload="<?= $payload ?>">Bearbeiten</button><form method="post" onsubmit="return confirm('Dienst wirklich löschen?')"><?= csrf_field() ?><input type="hidden" name="action" value="event_delete"><input type="hidden" name="id" value="<?= (int)$event['id'] ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?>
-</div></td></tr><?php endforeach; ?>
+$payload = e(json_encode(['id'=>$event['id'],'title'=>$event['title'],'event_type'=>$event['event_type'],'starts_at'=>date('Y-m-d\TH:i',strtotime($event['starts_at'])),'ends_at'=>date('Y-m-d\TH:i',strtotime($event['ends_at'])),'location_name'=>$event['location_name'],'description_text'=>$event['description_text'],'learning_goals'=>$event['learning_goals'],'material_needed'=>$event['material_needed'],'max_participants'=>$event['max_participants'],'response_deadline'=>$event['response_deadline'] ? date('Y-m-d\TH:i',strtotime($event['response_deadline'])) : '','reminder_at'=>$event['reminder_at'] ? date('Y-m-d\TH:i',strtotime($event['reminder_at'])) : '','recurrence_rule'=>$event['recurrence_rule'],'leader_id'=>$event['leader_id'],'status_name'=>$event['status_name']], JSON_UNESCAPED_UNICODE));
+?>
+<tr><td><strong><?= e($event['title']) ?></strong><small><?= e(event_type_label($event['event_type'])) ?><?= $event['learning_goals'] ? ' · Lernziel hinterlegt' : '' ?></small></td>
+<td><?= e(format_date($event['starts_at'],true)) ?> Uhr<small><?= e($event['location_name'] ?: 'Kein Ort') ?></small></td>
+<td><div class="response-stats"><span class="response-yes">✓ <?= (int)$event['yes_count'] ?></span><span class="response-no">× <?= (int)$event['no_count'] ?></span><span class="response-maybe">? <?= (int)$event['maybe_count'] ?></span></div><?php if($event['response_deadline']): ?><small>Frist <?= e(format_date($event['response_deadline'],true)) ?></small><?php endif; ?></td>
+<td><?= e($event['leader_name'] ?: 'Noch offen') ?></td>
+<td><span class="status status-<?= e($event['status_name']) ?>"><?= e(status_label($event['status_name'])) ?></span></td>
+<td><div class="row-actions"><a class="btn btn-secondary btn-small" href="?page=attendance&amp;event_id=<?= (int)$event['id'] ?>">Rückmeldungen</a><?php if(Auth::canManage()): ?><button class="btn btn-secondary btn-small" data-dialog-open="event-dialog" data-payload="<?= $payload ?>">Bearbeiten</button><form method="post" data-confirm="Dienst wirklich löschen?"><?= csrf_field() ?><input type="hidden" name="action" value="event_delete"><input type="hidden" name="id" value="<?= (int)$event['id'] ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?></div></td></tr><?php endforeach; ?>
 </tbody></table></div></section>
 
 <?php elseif ($page === 'attendance'):
-    $eventStmt = db()->prepare('SELECT id,title,starts_at FROM events WHERE tenant_id=? ORDER BY starts_at DESC LIMIT 30');
+    $eventStmt = db()->prepare('SELECT id,title,starts_at,response_deadline FROM events WHERE tenant_id=? ORDER BY starts_at DESC LIMIT 30');
     $eventStmt->execute([$tenantId]);
     $eventOptions = $eventStmt->fetchAll();
     $selectedEventId = (int) ($_GET['event_id'] ?? ($eventOptions[0]['id'] ?? 0));
@@ -347,17 +553,25 @@ $payload = e(json_encode(['id'=>$event['id'],'title'=>$event['title'],'event_typ
 <div class="toolbar"><form method="get"><input type="hidden" name="page" value="attendance"><div class="field"><label for="event-select">Dienst auswählen</label><select id="event-select" name="event_id" onchange="this.form.submit()"><?php foreach($eventOptions as $option): ?><option value="<?= (int)$option['id'] ?>" <?= $selectedEventId===(int)$option['id']?'selected':'' ?>><?= e(format_date($option['starts_at']).' · '.$option['title']) ?></option><?php endforeach; ?></select></div></form></div>
 <?php if (!$selectedEventId): ?><section class="panel"><div class="empty">Legen Sie zuerst einen Dienst an.</div></section>
 <?php else:
-$stmt = db()->prepare("SELECT m.id,m.first_name,m.last_name,COALESCE(a.attendance_status,'unknown') AS attendance_status FROM members m LEFT JOIN attendance a ON a.member_id=m.id AND a.event_id=? WHERE m.tenant_id=? AND m.status_name='active' ORDER BY m.member_type,m.last_name,m.first_name");
-$stmt->execute([$selectedEventId,$tenantId]);
+$stmt = db()->prepare("SELECT m.id,m.first_name,m.last_name,COALESCE(a.attendance_status,'unknown') AS attendance_status,COALESCE(r.response_status,'open') AS response_status FROM members m LEFT JOIN attendance a ON a.member_id=m.id AND a.event_id=? LEFT JOIN event_responses r ON r.member_id=m.id AND r.event_id=? WHERE m.tenant_id=? AND m.status_name='active' ORDER BY m.member_type,m.last_name,m.first_name");
+$stmt->execute([$selectedEventId,$selectedEventId,$tenantId]);
 $attendanceRows=$stmt->fetchAll();
 ?>
+<div class="split-grid">
+<form method="post"><input type="hidden" name="action" value="response_save"><input type="hidden" name="event_id" value="<?= $selectedEventId ?>"><?= csrf_field() ?>
+<section class="panel"><div class="panel-head"><div><p class="eyebrow">Vor dem Dienst</p><h2>Zu- und Absagen</h2></div><?php if(Auth::canManage()): ?><button class="btn btn-primary" type="submit">Rückmeldungen speichern</button><?php endif; ?></div><div class="panel-body attendance-list">
+<?php foreach($attendanceRows as $row): ?><div class="attendance-row"><strong><?= e($row['last_name'].', '.$row['first_name']) ?></strong>
+<?php foreach(['yes'=>'Zusage','no'=>'Absage','maybe'=>'Vielleicht','open'=>'Offen'] as $value=>$label): ?><label class="choice"><input type="radio" name="responses[<?= (int)$row['id'] ?>]" value="<?= $value ?>" <?= $row['response_status']===$value?'checked':'' ?> <?= Auth::canManage()?'':'disabled' ?>><span><?= $label ?></span></label><?php endforeach; ?>
+</div><?php endforeach; ?><?php if(!$attendanceRows): ?><div class="empty">Keine aktiven Mitglieder vorhanden.</div><?php endif; ?>
+</div></section></form>
+
 <form method="post"><input type="hidden" name="action" value="attendance_save"><input type="hidden" name="event_id" value="<?= $selectedEventId ?>"><?= csrf_field() ?>
-<section class="panel"><div class="panel-head"><h2>Anwesenheitsliste</h2><?php if(Auth::canManage()): ?><button class="btn btn-primary" type="submit">Anwesenheit speichern</button><?php endif; ?></div><div class="panel-body attendance-list">
+<section class="panel"><div class="panel-head"><div><p class="eyebrow">Beim Dienst</p><h2>Anwesenheit</h2></div><?php if(Auth::canManage()): ?><button class="btn btn-primary" type="submit">Anwesenheit speichern</button><?php endif; ?></div><div class="panel-body attendance-list">
 <?php foreach($attendanceRows as $row): ?><div class="attendance-row"><strong><?= e($row['last_name'].', '.$row['first_name']) ?></strong>
 <?php foreach(['present'=>'Anwesend','excused'=>'Entschuldigt','absent'=>'Fehlt','unknown'=>'Offen'] as $value=>$label): ?><label class="choice"><input type="radio" name="attendance[<?= (int)$row['id'] ?>]" value="<?= $value ?>" <?= $row['attendance_status']===$value?'checked':'' ?> <?= Auth::canManage()?'':'disabled' ?>><span><?= $label ?></span></label><?php endforeach; ?>
 </div><?php endforeach; ?>
-<?php if(!$attendanceRows): ?><div class="empty">Keine aktiven Mitglieder vorhanden.</div><?php endif; ?>
-</div></section></form><?php endif; ?>
+</div></section></form>
+</div><?php endif; ?>
 
 <?php elseif ($page === 'qualifications'):
 $stmt=db()->prepare('SELECT q.*,COUNT(mq.id) AS holders FROM qualifications q LEFT JOIN member_qualifications mq ON mq.qualification_id=q.id WHERE q.tenant_id=? GROUP BY q.id ORDER BY q.category_name,q.title');
@@ -388,11 +602,16 @@ $stmt=db()->prepare('SELECT * FROM organizations WHERE id=?');$stmt->execute([$t
 
 <dialog id="member-dialog"><form method="post"><div class="dialog-head"><h2>Mitglied verwalten</h2><button type="button" class="dialog-close" data-dialog-close aria-label="Schließen">×</button></div><div class="dialog-body form-grid">
 <?= csrf_field() ?><input type="hidden" name="action" value="member_save"><input type="hidden" name="id" value="">
+<div class="form-section field-full"><span>Person</span></div>
 <div class="field"><label>Vorname *</label><input name="first_name" required></div><div class="field"><label>Nachname *</label><input name="last_name" required></div>
 <div class="field"><label>Geburtsdatum</label><input name="birth_date" type="date"></div><div class="field"><label>Eintrittsdatum</label><input name="entry_date" type="date"></div>
-<div class="field"><label>Mitgliedsart</label><select name="member_type"><option value="youth">Jugendliche/r</option><option value="staff">Betreuer/in</option></select></div>
-<div class="field"><label>Status</label><select name="status_name"><option value="active">Aktiv</option><option value="paused">Pausiert</option><option value="left">Ausgetreten</option></select></div>
+<div class="field"><label>Mitgliedsart</label><select name="member_type"><option value="youth">Jugendliche/r</option><option value="staff">Betreuer/in</option></select></div><div class="field"><label>Status</label><select name="status_name"><option value="active">Aktiv</option><option value="paused">Pausiert</option><option value="left">Ausgetreten</option></select></div>
 <div class="field"><label>E-Mail</label><input name="email" type="email"></div><div class="field"><label>Telefon</label><input name="phone"></div>
+<div class="form-section field-full"><span>Anschrift & Schule</span></div>
+<div class="field field-full"><label>Straße und Hausnummer</label><input name="address_street"></div><div class="field"><label>PLZ</label><input name="postal_code"></div><div class="field"><label>Ort</label><input name="city"></div><div class="field field-full"><label>Schule</label><input name="school_name"></div>
+<div class="form-section field-full"><span>Kleidergrößen</span></div>
+<div class="field"><label>Shirt</label><input name="shirt_size" placeholder="z. B. 164"></div><div class="field"><label>Hose</label><input name="pants_size"></div><div class="field"><label>Schuhe</label><input name="shoe_size"></div><div class="field checkbox-row"><label><input type="checkbox" name="pickup_authorized" value="1"> Allgemein abholberechtigt</label></div>
+<div class="form-section field-full"><span>Notfall & interne Angaben</span></div>
 <div class="field"><label>Notfallkontakt</label><input name="emergency_name"></div><div class="field"><label>Notfalltelefon</label><input name="emergency_phone"></div>
 <div class="field field-full"><label>Medizinische Hinweise</label><textarea name="medical_notes"></textarea></div><div class="field field-full"><label>Interne Notizen</label><textarea name="notes_text"></textarea></div>
 </div><div class="dialog-actions"><button type="button" class="btn btn-secondary" data-dialog-close>Abbrechen</button><button class="btn btn-primary">Speichern</button></div></form></dialog>
@@ -402,7 +621,10 @@ $stmt=db()->prepare('SELECT * FROM organizations WHERE id=?');$stmt->execute([$t
 <div class="field field-full"><label>Titel *</label><input name="title" required></div><div class="field"><label>Art</label><select name="event_type"><option value="practice">Übung</option><option value="meeting">Besprechung</option><option value="trip">Ausflug</option><option value="competition">Wettbewerb</option><option value="other">Sonstiges</option></select></div>
 <div class="field"><label>Status</label><select name="status_name"><option value="published">Veröffentlicht</option><option value="draft">Entwurf</option><option value="completed">Abgeschlossen</option><option value="cancelled">Abgesagt</option></select></div>
 <div class="field"><label>Beginn *</label><input name="starts_at" type="datetime-local" required></div><div class="field"><label>Ende *</label><input name="ends_at" type="datetime-local" required></div>
-<div class="field field-full"><label>Ort</label><input name="location_name"></div><div class="field field-full"><label>Beschreibung</label><textarea name="description_text"></textarea></div>
+<div class="field"><label>Ort</label><input name="location_name"></div><div class="field"><label>Verantwortliche Leitung</label><select name="leader_id"><option value="">Noch offen</option><?php foreach($leaders as $leader): ?><option value="<?= (int)$leader['id'] ?>"><?= e($leader['last_name'].', '.$leader['first_name']) ?></option><?php endforeach; ?></select></div>
+<div class="field"><label>Max. Teilnehmende</label><input name="max_participants" type="number" min="1"></div><div class="field"><label>Wiederholung</label><select name="recurrence_rule"><option value="none">Keine</option><option value="weekly">Wöchentlich (6 Termine)</option><option value="biweekly">Alle 2 Wochen (6 Termine)</option><option value="monthly">Monatlich (6 Termine)</option></select></div>
+<div class="field"><label>Rückmeldefrist</label><input name="response_deadline" type="datetime-local"></div><div class="field"><label>Erinnerung am</label><input name="reminder_at" type="datetime-local"></div>
+<div class="field field-full"><label>Beschreibung</label><textarea name="description_text"></textarea></div><div class="field field-full"><label>Lernziele</label><textarea name="learning_goals"></textarea></div><div class="field field-full"><label>Benötigtes Material</label><textarea name="material_needed"></textarea></div>
 </div><div class="dialog-actions"><button type="button" class="btn btn-secondary" data-dialog-close>Abbrechen</button><button class="btn btn-primary">Speichern</button></div></form></dialog>
 
 <dialog id="user-dialog"><form method="post"><div class="dialog-head"><h2>Benutzerkonto anlegen</h2><button type="button" class="dialog-close" data-dialog-close aria-label="Schließen">×</button></div><div class="dialog-body form-grid">

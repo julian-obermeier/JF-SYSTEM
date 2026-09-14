@@ -65,7 +65,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $pdo->beginTransaction();
-            $slug = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', '-', iconv('UTF-8', 'ASCII//TRANSLIT', $organization)), '-'));
+            $slugSource = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT', $organization) : $organization;
+            $slug = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', '-', (string) $slugSource), '-'));
             $stmt = $pdo->prepare('INSERT INTO organizations (name, slug, city, email) VALUES (?, ?, ?, ?)');
             $stmt->execute([$organization, $slug ?: 'jugendfeuerwehr', $city ?: null, $email]);
             $tenantId = (int) $pdo->lastInsertId();

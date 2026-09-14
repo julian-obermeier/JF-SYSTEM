@@ -2,14 +2,15 @@
 
 Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehren.
 
-## Funktionsumfang der ersten Version
+## Funktionsumfang
 
 - Mandantenfähige Organisationen
 - Sicherer Login und rollenbasierter Zugriff
 - Dashboard mit Kennzahlen und nächstem Dienst
-- Mitgliederverwaltung
-- Dienst- und Übungsplanung
-- Anwesenheitserfassung
+- Erweiterte Mitgliederakten mit Anschrift, Schule, Größen und Notfallangaben
+- Sorgeberechtigte, Abholberechtigungen und Einwilligungsverwaltung
+- Dienst- und Übungsplanung mit Leitung, Lernzielen, Material und Terminserien
+- Zu-/Absagen, Rückmeldefristen und Anwesenheitserfassung
 - Qualifikationen
 - Benutzer- und Grundeinstellungen
 - Audit-Protokoll
@@ -31,6 +32,14 @@ Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehr
 4. Installation abschließen und anmelden.
 5. Den Ordner `install/` nach erfolgreicher Einrichtung löschen oder sperren.
 
+## Update einer bestehenden Installation
+
+1. Vorher Datenbank und Dateien sichern.
+2. Aktualisierte Dateien hochladen.
+3. Als Administrator `/update/` aufrufen.
+4. Migration **002 – Mitgliederakten & Rückmeldungen** ausführen.
+5. Den Ordner `update/` anschließend sperren oder löschen.
+
 Die Anwendung benötigt weder Composer noch Node.js und ist für übliches Shared Hosting geeignet.
 
 ## Sicherheit
@@ -50,6 +59,6 @@ Support wird über OBERMEIER IT bereitgestellt: https://ticket.obermeier-it.de
 
 ## Status
 
-Aktueller Entwicklungsstand: **v0.1.0 – Foundation Release**
+Aktueller Entwicklungsstand: **v0.2.0 – Mitgliederakten & Rückmeldungen**
 
 Diese Fassung ist eine produktionsnahe Grundlage. Vor einem Echtbetrieb mit personenbezogenen Daten sind Datenschutzkonzept, Berechtigungsmatrix, Backups, Mailversand und ein Hosting-Sicherheitsaudit zu vervollständigen.
