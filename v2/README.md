@@ -13,6 +13,7 @@ JF-SYSTEM v2 ist der vollständige, vom produktiven v1-System getrennte Neuaufba
 - serverseitige Rollen- und Rechteprüfung
 - zentrale URL- und Asset-Erzeugung
 - keine Übernahme oder Veränderung produktiver v1-Daten während der Entwicklung
+- ausdrücklich keine Datenmigration, kein v1-Import und keine automatische Zusammenführung
 
 ## Lokaler Start
 
@@ -44,4 +45,4 @@ tools/        Entwicklungswerkzeuge
 
 ## Status
 
-Phase 1 enthält den neuen Kern, Login, Mandantenauswahl, Dashboard, Mitgliederverwaltung und Dienstanlage. Weitere Module werden in eigenständigen Ausbaustufen ergänzt.
+Phase 1 enthält den neuen Kern, Login, Mandantenauswahl, Dashboard, Mitgliederverwaltung und Dienstanlage. Weitere Module werden in eigenständigen Ausbaustufen ergänzt. Die v2 bleibt dabei dauerhaft eine frische Neuinstallation ohne Datenmigration aus v1.
