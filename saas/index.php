@@ -27,6 +27,49 @@ foreach ($seedPlans as $plan) $planInsert->execute($plan);
 $addonInsert = $pdo->prepare('INSERT IGNORE INTO saas_addons (addon_key,name,description,monthly_price) VALUES (?,?,?,?)');
 foreach ([['advanced_reports','Erweiterte Auswertungen','PDF- und Jahresberichte',4.90],['parent_portal','Elternportal','Rückmeldungen und Informationen für Eltern',6.90],['priority_support','Prioritäts-Support','Bevorzugte Bearbeitung über OBERMEIER-IT',9.90]] as $addon) $addonInsert->execute($addon);
 
+/*
+ * Übernimmt Installationen, die vor dem SaaS-Ausbau angelegt wurden.
+ * Der Betreiber-Mandant erhält Enterprise/manuell, weitere Bestandsmandanten
+ * starten im kostenlosen 30-Tage-Test. Es werden keine Fachdaten verändert.
+ */
+$freePlanId = (int) $pdo->query("SELECT id FROM saas_plans WHERE plan_key='free' LIMIT 1")->fetchColumn();
+$enterprisePlanId = (int) $pdo->query("SELECT id FROM saas_plans WHERE plan_key='enterprise' LIMIT 1")->fetchColumn();
+$legacyTenants = $pdo->query(
+    'SELECT o.id, o.name, o.email,
+            EXISTS(SELECT 1 FROM users u WHERE u.tenant_id=o.id AND u.is_superadmin=1) AS is_operator_tenant
+     FROM organizations o
+     LEFT JOIN saas_subscriptions s ON s.tenant_id=o.id
+     WHERE s.id IS NULL'
+)->fetchAll();
+$subscriptionInsert = $pdo->prepare(
+    'INSERT IGNORE INTO saas_subscriptions
+     (tenant_id,plan_id,status_name,billing_cycle,starts_at,trial_ends_at,current_period_start,current_period_end)
+     VALUES (?,?,?,?,?,?,?,?)'
+);
+$settingsInsert = $pdo->prepare(
+    'INSERT IGNORE INTO saas_tenant_settings (tenant_id,display_name,support_email) VALUES (?,?,?)'
+);
+foreach ($legacyTenants as $legacyTenant) {
+    $isOperatorTenant = (int) $legacyTenant['is_operator_tenant'] === 1;
+    $startsAt = date('Y-m-d');
+    $periodEnd = $isOperatorTenant ? null : date('Y-m-d', strtotime('+30 days'));
+    $subscriptionInsert->execute([
+        (int) $legacyTenant['id'],
+        $isOperatorTenant ? $enterprisePlanId : $freePlanId,
+        $isOperatorTenant ? 'active' : 'trial',
+        'manual',
+        $startsAt,
+        $periodEnd,
+        $startsAt,
+        $periodEnd,
+    ]);
+    $settingsInsert->execute([
+        (int) $legacyTenant['id'],
+        (string) $legacyTenant['name'],
+        $legacyTenant['email'] ?: null,
+    ]);
+}
+
 function saas_redirect(string $tab = 'overview'): never { header('Location: index.php?tab=' . urlencode($tab)); exit; }
 function saas_date(?string $value): string { return $value ? (new DateTimeImmutable($value))->format('d.m.Y') : '–'; }
 function saas_money(mixed $value): string { return number_format((float)$value, 2, ',', '.') . ' €'; }
