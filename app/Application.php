@@ -205,7 +205,7 @@ final class Application
 
     private function attendance(string $method): void
     {
-        $this->assertPermission('events.manage');
+        $this->assertPermission($method === 'POST' ? 'events.manage' : 'events.view');
         $repository = new EventRepository($this->db, $this->tenant);
         if ($method === 'POST') {
             $this->assertCsrf();
