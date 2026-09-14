@@ -149,8 +149,9 @@ final class Application
                 }
             }
             if ($errors === []) {
-                $id = $repository->create($_POST, (int) $user['id']);
-                $_SESSION['flash'] = 'Mitglied wurde erfolgreich angelegt.';
+                $existingId=(int)($_POST['member_id']??0);
+                if($existingId>0){$repository->update($existingId,$_POST);$repository->saveGuardian($existingId,$_POST);$repository->saveConsent($existingId,$_POST);$id=$existingId;$_SESSION['flash']='Mitglied wurde aktualisiert.';}
+                else {$id = $repository->create($_POST, (int) $user['id']);$_SESSION['flash'] = 'Mitglied wurde erfolgreich angelegt.';}
                 $this->redirect('/members?member=' . $id);
             }
         }
