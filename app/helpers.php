@@ -97,6 +97,38 @@ function role_label(string $role): string
     return ['admin' => 'Administrator', 'leader' => 'Jugendwart', 'staff' => 'Betreuer', 'viewer' => 'Leser'][$role] ?? $role;
 }
 
+function status_label(?string $status): string
+{
+    return [
+        'active' => 'Aktiv',
+        'paused' => 'Pausiert',
+        'left' => 'Ausgetreten',
+        'draft' => 'Entwurf',
+        'published' => 'Veröffentlicht',
+        'cancelled' => 'Abgesagt',
+        'completed' => 'Abgeschlossen',
+        'present' => 'Anwesend',
+        'excused' => 'Entschuldigt',
+        'absent' => 'Fehlt',
+        'unknown' => 'Offen',
+        'yes' => 'Zusage',
+        'no' => 'Absage',
+        'maybe' => 'Vielleicht',
+        'open' => 'Offen',
+    ][$status ?? ''] ?? ($status ?: '–');
+}
+
+function event_type_label(?string $type): string
+{
+    return [
+        'practice' => 'Übung',
+        'meeting' => 'Besprechung',
+        'trip' => 'Ausflug',
+        'competition' => 'Wettbewerb',
+        'other' => 'Sonstiges',
+    ][$type ?? ''] ?? ($type ?: '–');
+}
+
 function initials(string $firstName, string $lastName): string
 {
     return mb_strtoupper(mb_substr($firstName, 0, 1) . mb_substr($lastName, 0, 1));
