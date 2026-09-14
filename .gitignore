@@ -1,8 +1,8 @@
 /config/config.php
-/storage/*
-!/storage/.gitignore
-!/storage/.htaccess
-*.log
-.DS_Store
-.idea/
-.vscode/
+/storage/*.sqlite
+/storage/logs/*
+/storage/cache/*
+/storage/uploads/*
+!/storage/logs/.gitignore
+!/storage/cache/.gitignore
+!/storage/uploads/.gitignore
