@@ -4,9 +4,11 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 
 $pdo = db();
-$schema = dirname(__DIR__) . '/database/migrations/005_saas_operations.sql';
-foreach (array_filter(array_map('trim', explode(';', (string) file_get_contents($schema)))) as $statement) {
-    $pdo->exec($statement);
+$schemaFiles = [dirname(__DIR__) . '/database/migrations/004_saas_platform.sql', dirname(__DIR__) . '/database/migrations/005_saas_operations.sql'];
+foreach ($schemaFiles as $schema) {
+    foreach (array_filter(array_map('trim', explode(';', (string) file_get_contents($schema)))) as $statement) {
+        $pdo->exec($statement);
+    }
 }
 $plans = $pdo->query("SELECT id,name,monthly_price FROM saas_plans WHERE is_active=1 AND is_public=1 ORDER BY monthly_price")->fetchAll();
 $errors=[]; $sent=false;
