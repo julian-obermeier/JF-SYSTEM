@@ -66,6 +66,10 @@ final class Application
                 $this->events($method, $user);
                 return;
             }
+            if ($path === '/attendance') {
+                $this->attendance($method);
+                return;
+            }
 
             http_response_code(404);
             echo $this->view->render('errors/404', $this->shared('Nicht gefunden'));
@@ -197,6 +201,28 @@ final class Application
             }
         }
         echo $this->view->render('events/index', $this->shared('Dienste & Übungen', 'events') + ['events' => $repository->upcoming(), 'errors' => $errors]);
+    }
+
+    private function attendance(string $method): void
+    {
+        $this->assertPermission('events.manage');
+        $repository = new EventRepository($this->db, $this->tenant);
+        if ($method === 'POST') {
+            $this->assertCsrf();
+            $eventId = (int) ($_POST['event_id'] ?? 0);
+            $memberId = (int) ($_POST['member_id'] ?? 0);
+            $repository->saveAttendance($eventId, $memberId, (string) ($_POST['status'] ?? 'open'));
+            $_SESSION['flash'] = 'Anwesenheit wurde gespeichert.';
+            $this->redirect('/attendance?event=' . $eventId);
+        }
+        $events = $repository->attendanceEvents();
+        $eventId = (int) ($_GET['event'] ?? ($events[0]['id'] ?? 0));
+        $selectedEvent = null;
+        foreach ($events as $event) {
+            if ((int) $event['id'] === $eventId) { $selectedEvent = $event; break; }
+        }
+        $rows = $selectedEvent ? $repository->attendanceMatrix($eventId) : [];
+        echo $this->view->render('attendance/index', $this->shared('Anwesenheit', 'attendance') + compact('events', 'selectedEvent', 'rows'));
     }
 
     private function shared(string $title, string $active = ''): array
