@@ -35,7 +35,7 @@
             <?php
             $items = [
                 ['dashboard','/','i-home','Übersicht'], ['members','/members','i-users','Mitglieder'],
-                ['events','/events','i-calendar','Dienste & Übungen'], ['attendance','#','i-check','Anwesenheit'],
+                ['events','/events','i-calendar','Dienste & Übungen'], ['attendance','/attendance','i-check','Anwesenheit'],
                 ['qualifications','#','i-award','Qualifikationen'], ['documents','#','i-file','Dokumente'],
                 ['messages','#','i-mail','Nachrichten'], ['reports','#','i-chart','Auswertungen'],
                 ['settings','#','i-settings','Einstellungen'],
