@@ -105,11 +105,31 @@ function initials(string $firstName, string $lastName): string
 function asset_url(string $path): string
 {
     $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
-    $base = rtrim(dirname($script), '/');
-    if (!str_contains($script, '/public/')) {
+    $base = rtrim(dirname($script), '/.');
+    $publicRoot = realpath(APP_ROOT . '/public');
+    $documentRoot = realpath((string) ($_SERVER['DOCUMENT_ROOT'] ?? ''));
+
+    // Unterstützt beide Installationsarten:
+    // 1. Domain zeigt auf den Projektordner: /public/assets/...
+    // 2. Domain zeigt direkt auf public/: /assets/...
+    $publicIsDocumentRoot = $publicRoot !== false
+        && $documentRoot !== false
+        && rtrim($documentRoot, DIRECTORY_SEPARATOR) === rtrim($publicRoot, DIRECTORY_SEPARATOR);
+
+    if (!$publicIsDocumentRoot && !str_contains($script, '/public/')) {
         $base .= '/public';
     }
-    return ($base ?: '') . '/assets/' . ltrim($path, '/');
+
+    $relativePath = ltrim($path, '/');
+    $url = ($base ?: '') . '/assets/' . $relativePath;
+    $assetFile = APP_ROOT . '/public/assets/' . $relativePath;
+
+    // Verhindert, dass Browser nach Updates alte CSS-/JS-Dateien verwenden.
+    if (is_file($assetFile)) {
+        $url .= '?v=' . (string) filemtime($assetFile);
+    }
+
+    return $url;
 }
 
 function icon(string $name): string
