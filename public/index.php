@@ -55,6 +55,56 @@ Auth::requireLogin();
 $user = Auth::user();
 $tenantId = tenant_id();
 
+$downloadId = (int) ($_GET['download_document'] ?? 0);
+if ($downloadId > 0) {
+    $stmt = db()->prepare('SELECT * FROM member_documents WHERE id=? AND tenant_id=?');
+    $stmt->execute([$downloadId,$tenantId]);
+    $document = $stmt->fetch();
+    if (!$document || ($document['document_type'] === 'medical' && !Auth::canManage())) { http_response_code(404); exit('Dokument nicht gefunden.'); }
+    $path = dirname(__DIR__) . '/storage/member-documents/' . $tenantId . '/' . (int)$document['member_id'] . '/' . basename((string)$document['stored_name']);
+    if (!is_file($path)) { http_response_code(404); exit('Datei nicht gefunden.'); }
+    header('Content-Type: ' . $document['mime_type']);
+    header('Content-Length: ' . filesize($path));
+    header('Content-Disposition: attachment; filename="' . str_replace(['"', "\\", "", "
+"], '', (string)$document['original_name']) . '"');
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
+}
+
+$export = (string) ($_GET['export'] ?? '');
+if ($export !== '') {
+    if (!Auth::canManage()) { http_response_code(403); exit('Keine Berechtigung.'); }
+    $filename = 'jf-system-' . $export . '-' . date('Y-m-d') . '.csv';
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    echo "\xEF\xBB\xBF";
+    $out = fopen('php://output', 'wb');
+    if ($export === 'members') {
+        fputcsv($out, ['Nachname','Vorname','Geburtsdatum','Eintritt','Mitgliedsart','Status','E-Mail','Telefon','Straße','PLZ','Ort','Schule'], ';');
+        $stmt = db()->prepare('SELECT last_name,first_name,birth_date,entry_date,member_type,status_name,email,phone,address_street,postal_code,city,school_name FROM members WHERE tenant_id=? ORDER BY last_name,first_name');
+        $stmt->execute([$tenantId]);
+        while ($row = $stmt->fetch(PDO::FETCH_NUM)) { fputcsv($out, $row, ';'); }
+    } elseif ($export === 'events') {
+        fputcsv($out, ['Titel','Art','Beginn','Ende','Ort','Leitung','Status','Max. Teilnehmende','Rückmeldefrist'], ';');
+        $stmt = db()->prepare("SELECT e.title,e.event_type,e.starts_at,e.ends_at,e.location_name,CONCAT(u.first_name,' ',u.last_name),e.status_name,e.max_participants,e.response_deadline FROM events e LEFT JOIN users u ON u.id=e.leader_id WHERE e.tenant_id=? ORDER BY e.starts_at");
+        $stmt->execute([$tenantId]);
+        while ($row = $stmt->fetch(PDO::FETCH_NUM)) { fputcsv($out, $row, ';'); }
+    } elseif ($export === 'attendance') {
+        $eventId = (int) ($_GET['event_id'] ?? 0);
+        fputcsv($out, ['Mitglied','Rückmeldung','Anwesenheit'], ';');
+        $stmt = db()->prepare("SELECT CONCAT(m.last_name,', ',m.first_name),COALESCE(r.response_status,'open'),COALESCE(a.attendance_status,'unknown') FROM members m LEFT JOIN event_responses r ON r.member_id=m.id AND r.event_id=? LEFT JOIN attendance a ON a.member_id=m.id AND a.event_id=? WHERE m.tenant_id=? AND m.status_name='active' ORDER BY m.last_name,m.first_name");
+        $stmt->execute([$eventId,$eventId,$tenantId]);
+        while ($row = $stmt->fetch(PDO::FETCH_NUM)) { fputcsv($out, $row, ';'); }
+    } else {
+        fclose($out);
+        http_response_code(404);
+        exit('Export nicht gefunden.');
+    }
+    fclose($out);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     require_csrf();
     $action = (string) ($_POST['action'] ?? '');
@@ -68,6 +118,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!Auth::canManage()) {
             throw new RuntimeException('Sie besitzen für diese Aktion keine Berechtigung.');
+        }
+
+        if ($action === 'document_upload') {
+            $memberId = (int) ($_POST['member_id'] ?? 0);
+            $memberCheck = db()->prepare('SELECT id FROM members WHERE id=? AND tenant_id=?');
+            $memberCheck->execute([$memberId, $tenantId]);
+            if (!$memberCheck->fetchColumn()) {
+                throw new RuntimeException('Mitglied wurde nicht gefunden.');
+            }
+            $file = $_FILES['document_file'] ?? null;
+            $title = trim((string) ($_POST['document_title'] ?? ''));
+            $type = in_array($_POST['document_type'] ?? '', ['consent','medical','membership','certificate','other'], true) ? $_POST['document_type'] : 'other';
+            if ($title === '' || !is_array($file) || (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                throw new RuntimeException('Titel und eine gültige Datei sind erforderlich.');
+            }
+            if ((int) ($file['size'] ?? 0) > 8 * 1024 * 1024) {
+                throw new RuntimeException('Dokumente dürfen maximal 8 MB groß sein.');
+            }
+            $originalName = basename((string) ($file['name'] ?? 'dokument'));
+            $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+            $allowedExtensions = ['pdf','jpg','jpeg','png','doc','docx'];
+            if (!in_array($extension, $allowedExtensions, true)) {
+                throw new RuntimeException('Erlaubt sind PDF, JPG, PNG, DOC und DOCX.');
+            }
+            $mime = 'application/octet-stream';
+            if (class_exists('finfo')) {
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $mime = (string) $finfo->file((string) $file['tmp_name']);
+            }
+            $allowedMimes = ['application/pdf','image/jpeg','image/png','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+            if (!in_array($mime, $allowedMimes, true)) {
+                throw new RuntimeException('Der Dateityp konnte nicht sicher erkannt werden.');
+            }
+            $documentRoot = dirname(__DIR__) . '/storage/member-documents/' . $tenantId . '/' . $memberId;
+            if (!is_dir($documentRoot) && !mkdir($documentRoot, 0750, true) && !is_dir($documentRoot)) {
+                throw new RuntimeException('Dokumentenordner konnte nicht angelegt werden.');
+            }
+            $storedName = bin2hex(random_bytes(16)) . '.' . $extension;
+            if (!move_uploaded_file((string) $file['tmp_name'], $documentRoot . '/' . $storedName)) {
+                throw new RuntimeException('Die Datei konnte nicht gespeichert werden.');
+            }
+            $stmt = db()->prepare('INSERT INTO member_documents (tenant_id,member_id,document_type,title,original_name,stored_name,mime_type,file_size,uploaded_by) VALUES (?,?,?,?,?,?,?,?,?)');
+            $stmt->execute([$tenantId,$memberId,$type,$title,$originalName,$storedName,$mime,(int)$file['size'],(int)$user['id']]);
+            audit('create', 'member_documents', (int) db()->lastInsertId(), 'Dokument hochgeladen: ' . $title);
+            flash('success', 'Dokument wurde sicher abgelegt.');
+            redirect('?page=members&member_id=' . $memberId);
+        }
+
+        if ($action === 'document_delete') {
+            $documentId = (int) ($_POST['id'] ?? 0);
+            $stmt = db()->prepare('SELECT * FROM member_documents WHERE id=? AND tenant_id=?');
+            $stmt->execute([$documentId,$tenantId]);
+            $document = $stmt->fetch();
+            if ($document) {
+                $path = dirname(__DIR__) . '/storage/member-documents/' . $tenantId . '/' . (int)$document['member_id'] . '/' . basename((string)$document['stored_name']);
+                if (is_file($path)) { unlink($path); }
+                db()->prepare('DELETE FROM member_documents WHERE id=? AND tenant_id=?')->execute([$documentId,$tenantId]);
+                audit('delete', 'member_documents', $documentId, 'Dokument gelöscht');
+                flash('success', 'Dokument wurde gelöscht.');
+                redirect('?page=members&member_id=' . (int)$document['member_id']);
+            }
+            throw new RuntimeException('Dokument wurde nicht gefunden.');
+        }
+
+        if ($action === 'template_save') {
+            $title = trim((string) ($_POST['title'] ?? ''));
+            if ($title === '') { throw new RuntimeException('Der Vorlagenname ist erforderlich.'); }
+            $stmt = db()->prepare('INSERT INTO event_templates (tenant_id,title,event_type,duration_minutes,location_name,description_text,learning_goals,material_needed,max_participants,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)');
+            $stmt->execute([$tenantId,$title,in_array($_POST['event_type'] ?? '', ['practice','meeting','trip','competition','other'], true) ? $_POST['event_type'] : 'practice',(int)($_POST['duration_minutes'] ?? 90) ?: 90,trim((string)($_POST['location_name'] ?? '')) ?: null,trim((string)($_POST['description_text'] ?? '')) ?: null,trim((string)($_POST['learning_goals'] ?? '')) ?: null,trim((string)($_POST['material_needed'] ?? '')) ?: null,(int)($_POST['max_participants'] ?? 0) ?: null,(int)$user['id']]);
+            audit('create','event_templates',(int)db()->lastInsertId(),'Dienstvorlage erstellt: '.$title);
+            flash('success','Dienstvorlage wurde gespeichert.');
+            redirect('?page=events');
+        }
+
+        if ($action === 'template_delete') {
+            $id = (int) ($_POST['id'] ?? 0);
+            db()->prepare('DELETE FROM event_templates WHERE id=? AND tenant_id=?')->execute([$id,$tenantId]);
+            audit('delete','event_templates',$id,'Dienstvorlage gelöscht');
+            flash('success','Dienstvorlage wurde gelöscht.');
+            redirect('?page=events');
         }
 
         if ($action === 'member_save') {
@@ -417,8 +547,9 @@ $leaders = $leaderStmt->fetchAll();
 <main class="content">
 <?php if ($flash): ?><div class="flash <?= $flash['type'] === 'error' ? 'flash-error' : '' ?>"><?= e($flash['message']) ?></div><?php endif; ?>
 <div class="page-head"><div><h1><?= e($heading) ?></h1><p><?= e($subheading) ?></p></div>
-<?php if ($page === 'members' && Auth::canManage()): ?><button class="btn btn-primary" data-dialog-open="member-dialog"><?= icon('plus') ?> Mitglied anlegen</button><?php endif; ?>
-<?php if ($page === 'events' && Auth::canManage()): ?><button class="btn btn-primary" data-dialog-open="event-dialog"><?= icon('plus') ?> Dienst anlegen</button><?php endif; ?>
+<?php if ($page === 'members' && Auth::canManage()): ?><a class="btn btn-secondary" href="?export=members"><?= icon('download') ?> CSV exportieren</a><button class="btn btn-primary" data-dialog-open="member-dialog"><?= icon('plus') ?> Mitglied anlegen</button><?php endif; ?>
+<?php if ($page === 'events' && Auth::canManage()): ?><a class="btn btn-secondary" href="?export=events"><?= icon('download') ?> CSV exportieren</a><button class="btn btn-secondary" data-dialog-open="template-dialog"><?= icon('file') ?> Vorlage anlegen</button><button class="btn btn-primary" data-dialog-open="event-dialog"><?= icon('plus') ?> Dienst anlegen</button><?php endif; ?>
+<?php if ($page === 'attendance' && Auth::canManage()): ?><a class="btn btn-secondary" href="?export=attendance&amp;event_id=<?= (int)($_GET['event_id'] ?? 0) ?>"><?= icon('download') ?> CSV exportieren</a><?php endif; ?>
 <?php if ($page === 'users' && Auth::isAdmin()): ?><button class="btn btn-primary" data-dialog-open="user-dialog"><?= icon('plus') ?> Benutzer anlegen</button><?php endif; ?>
 </div>
 
@@ -429,6 +560,23 @@ $leaders = $leaderStmt->fetchAll();
     $consentStmt = db()->prepare("SELECT COUNT(*) FROM member_consents WHERE tenant_id=? AND (consent_status<>'granted' OR (expires_at IS NOT NULL AND expires_at<CURDATE()))");
     $consentStmt->execute([$tenantId]);
     $consentAlertCount = (int) $consentStmt->fetchColumn();
+    $birthdayStmt = db()->prepare("SELECT id,first_name,last_name,birth_date FROM members WHERE tenant_id=? AND status_name='active' AND birth_date IS NOT NULL");
+    $birthdayStmt->execute([$tenantId]);
+    $birthdayRows = [];
+    $today = new DateTimeImmutable('today');
+    foreach ($birthdayStmt->fetchAll() as $birthday) {
+        $birth = new DateTimeImmutable($birthday['birth_date']);
+        $nextBirthday = $birth->setDate((int)$today->format('Y'), (int)$birth->format('m'), (int)$birth->format('d'));
+        if ($nextBirthday < $today) { $nextBirthday = $nextBirthday->modify('+1 year'); }
+        $birthday['next_date'] = $nextBirthday;
+        $birthday['age'] = (int)$nextBirthday->format('Y') - (int)$birth->format('Y');
+        $birthdayRows[] = $birthday;
+    }
+    usort($birthdayRows, static fn(array $a,array $b): int => $a['next_date'] <=> $b['next_date']);
+    $birthdayRows = array_slice($birthdayRows, 0, 5);
+    $deadlineStmt = db()->prepare("SELECT c.title,m.first_name,m.last_name,c.expires_at FROM member_consents c JOIN members m ON m.id=c.member_id WHERE c.tenant_id=? AND c.consent_status='granted' AND c.expires_at BETWEEN CURDATE() AND DATE_ADD(CURDATE(),INTERVAL 45 DAY) ORDER BY c.expires_at LIMIT 5");
+    $deadlineStmt->execute([$tenantId]);
+    $consentDeadlines = $deadlineStmt->fetchAll();
     $rateStmt = db()->prepare("SELECT ROUND(100*SUM(a.attendance_status='present')/NULLIF(COUNT(*),0)) FROM attendance a WHERE a.tenant_id=?");
     $rateStmt->execute([$tenantId]);
     $attendanceRate = (int) ($rateStmt->fetchColumn() ?: 0);
@@ -445,6 +593,10 @@ $leaders = $leaderStmt->fetchAll();
 <div class="metric"><div class="metric-icon"><?= icon('check') ?></div><div><strong><?= $attendanceRate ?> %</strong><span>Anwesenheit gesamt</span></div></div>
 <div class="metric"><div class="metric-icon"><?= icon('calendar') ?></div><div><strong><?= $eventCount ?></strong><span>kommende Dienste</span></div></div>
 <div class="metric <?= $consentAlertCount ? 'metric-alert' : '' ?>"><div class="metric-icon"><?= icon('file') ?></div><div><strong><?= $consentAlertCount ?></strong><span>Einwilligungen prüfen</span></div></div>
+</div>
+<div class="dashboard-grid">
+<section class="panel"><div class="panel-head"><div><p class="eyebrow">Im Blick behalten</p><h2>Nächste Geburtstage</h2></div><a class="btn btn-secondary btn-small" href="?page=members">Mitglieder</a></div><div class="panel-body compact-list"><?php if(!$birthdayRows): ?><div class="empty">Keine Geburtstage hinterlegt.</div><?php endif; ?><?php foreach($birthdayRows as $birthday): ?><div class="list-row"><div><strong><?= e($birthday['first_name'].' '.$birthday['last_name']) ?></strong><small><?= e($birthday['age']) ?> Jahre</small></div><span><?= e($birthday['next_date']->format('d.m.')) ?></span></div><?php endforeach; ?></div></section>
+<section class="panel"><div class="panel-head"><div><p class="eyebrow">Fristen</p><h2>Einwilligungen laufen ab</h2></div><a class="btn btn-secondary btn-small" href="?page=members">Akte öffnen</a></div><div class="panel-body compact-list"><?php if(!$consentDeadlines): ?><div class="empty">Keine Fristen in den nächsten 45 Tagen.</div><?php endif; ?><?php foreach($consentDeadlines as $deadline): ?><div class="list-row"><div><strong><?= e($deadline['title']) ?></strong><small><?= e($deadline['first_name'].' '.$deadline['last_name']) ?></small></div><span class="alert-count"><?= e(format_date($deadline['expires_at'])) ?></span></div><?php endforeach; ?></div></section>
 </div>
 <div class="dashboard-grid">
 <section class="panel"><div class="panel-head"><h2>Nächster Dienst</h2><a class="btn btn-secondary btn-small" href="?page=events">Alle anzeigen</a></div><div class="panel-body">
@@ -465,7 +617,7 @@ $leaders = $leaderStmt->fetchAll();
     $stmt->execute([$tenantId]);
     $members = $stmt->fetchAll();
     $selectedMemberId = (int) ($_GET['member_id'] ?? 0);
-    $selectedMember = null; $guardians = []; $consents = [];
+    $selectedMember = null; $guardians = []; $consents = []; $documents = [];
     if ($selectedMemberId) {
         $detailStmt = db()->prepare('SELECT * FROM members WHERE id=? AND tenant_id=?');
         $detailStmt->execute([$selectedMemberId,$tenantId]);
@@ -475,6 +627,8 @@ $leaders = $leaderStmt->fetchAll();
             $gStmt->execute([$selectedMemberId,$tenantId]); $guardians = $gStmt->fetchAll();
             $cStmt = db()->prepare('SELECT * FROM member_consents WHERE member_id=? AND tenant_id=? ORDER BY expires_at IS NULL,expires_at,consent_type');
             $cStmt->execute([$selectedMemberId,$tenantId]); $consents = $cStmt->fetchAll();
+            $dStmt = db()->prepare('SELECT * FROM member_documents WHERE member_id=? AND tenant_id=? ORDER BY created_at DESC');
+            $dStmt->execute([$selectedMemberId,$tenantId]); $documents = $dStmt->fetchAll();
         }
     }
 ?>
@@ -519,6 +673,12 @@ $consentClass = $consent['consent_status']==='granted' && (!$consent['expires_at
 <div class="field"><label>Titel *</label><input name="consent_title" required placeholder="z. B. Fotoerlaubnis"></div><div class="field"><label>Typ</label><select name="consent_type"><option value="photo">Foto/Video</option><option value="privacy">Datenschutz</option><option value="medical">Medizinisch</option><option value="trip">Ausflug</option><option value="other">Sonstiges</option></select></div>
 <div class="field"><label>Status</label><select name="consent_status"><option value="granted">Erteilt</option><option value="open">Offen</option><option value="declined">Abgelehnt</option><option value="revoked">Widerrufen</option></select></div><div class="field"><label>Erteilt am</label><input name="granted_at" type="date"></div><div class="field"><label>Gültig bis</label><input name="expires_at" type="date"></div><div class="field"><label>Dokument/Referenz</label><input name="document_reference"></div><div class="field field-full"><label>Notiz</label><textarea name="consent_note"></textarea></div><div class="field field-full"><button class="btn btn-primary">Einwilligung hinzufügen</button></div></form><?php endif; ?>
 </div></section>
+
+<section class="panel"><div class="panel-head"><h2>Dokumente</h2><span class="panel-meta">max. 8 MB pro Datei</span></div><div class="panel-body">
+<div class="consent-list"><?php foreach($documents as $document): ?><article class="consent-card"><div><strong><?= e($document['title']) ?></strong><small><?= e($document['original_name']) ?> · <?= e(number_format(((int)$document['file_size'])/1024,0,',','.')) ?> KB</small><small><?= e(format_date($document['created_at'],true)) ?></small></div><a class="btn btn-secondary btn-small" href="?download_document=<?= (int)$document['id'] ?>">Herunterladen</a><?php if(Auth::canManage()): ?><form method="post" data-confirm="Dokument wirklich löschen?"><?= csrf_field() ?><input type="hidden" name="action" value="document_delete"><input type="hidden" name="id" value="<?= (int)$document['id'] ?>"><button class="btn btn-danger btn-small">Löschen</button></form><?php endif; ?></article><?php endforeach; ?><?php if(!$documents): ?><div class="empty">Noch keine Dokumente abgelegt.</div><?php endif; ?></div>
+<?php if(Auth::canManage()): ?><form method="post" enctype="multipart/form-data" class="form-grid compact-form"><?= csrf_field() ?><input type="hidden" name="action" value="document_upload"><input type="hidden" name="member_id" value="<?= $selectedMemberId ?>">
+<div class="field"><label>Bezeichnung *</label><input name="document_title" required placeholder="z. B. unterschriebene Einwilligung"></div><div class="field"><label>Kategorie</label><select name="document_type"><option value="consent">Einwilligung</option><option value="membership">Aufnahme</option><option value="medical">Medizinisch</option><option value="certificate">Nachweis</option><option value="other">Sonstiges</option></select></div><div class="field field-full"><label>Datei *</label><input type="file" name="document_file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" required></div><div class="field field-full"><button class="btn btn-primary">Dokument sicher ablegen</button></div></form><?php endif; ?>
+</div></section>
 </div>
 <?php endif; ?>
 
@@ -530,7 +690,15 @@ $consentClass = $consent['consent_status']==='granted' && (!$consent['expires_at
         FROM events e LEFT JOIN users u ON u.id=e.leader_id WHERE e.tenant_id=? ORDER BY e.starts_at DESC");
     $stmt->execute([$tenantId]);
     $events = $stmt->fetchAll();
+    $templateStmt = db()->prepare('SELECT * FROM event_templates WHERE tenant_id=? ORDER BY title');
+    $templateStmt->execute([$tenantId]);
+    $eventTemplates = $templateStmt->fetchAll();
 ?>
+<?php if($eventTemplates && Auth::canManage()): ?><section class="panel"><div class="panel-head"><div><p class="eyebrow">Schneller planen</p><h2>Dienstvorlagen</h2></div><span class="panel-meta"><?= count($eventTemplates) ?> Vorlagen</span></div><div class="template-grid">
+<?php foreach($eventTemplates as $template):
+$templatePayload=e(json_encode(['title'=>$template['title'],'event_type'=>$template['event_type'],'location_name'=>$template['location_name'],'description_text'=>$template['description_text'],'learning_goals'=>$template['learning_goals'],'material_needed'=>$template['material_needed'],'max_participants'=>$template['max_participants']],JSON_UNESCAPED_UNICODE));
+?><article class="template-card"><div><strong><?= e($template['title']) ?></strong><small><?= e(event_type_label($template['event_type'])) ?> · <?= (int)$template['duration_minutes'] ?> Minuten<?= $template['location_name'] ? ' · '.e($template['location_name']) : '' ?></small></div><div class="row-actions"><button class="btn btn-secondary btn-small" data-dialog-open="event-dialog" data-payload="<?= $templatePayload ?>">Verwenden</button><form method="post" data-confirm="Vorlage löschen?"><?= csrf_field() ?><input type="hidden" name="action" value="template_delete"><input type="hidden" name="id" value="<?= (int)$template['id'] ?>"><button class="btn btn-danger btn-small">Löschen</button></form></div></article><?php endforeach; ?></div></section><?php endif; ?>
+
 <section class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Dienst</th><th>Termin & Ort</th><th>Rückmeldungen</th><th>Leitung</th><th>Status</th><th></th></tr></thead><tbody>
 <?php if (!$events): ?><tr><td colspan="6"><div class="empty">Noch keine Dienste oder Übungen angelegt.</div></td></tr><?php endif; ?>
 <?php foreach ($events as $event):
@@ -615,6 +783,12 @@ $stmt=db()->prepare('SELECT * FROM organizations WHERE id=?');$stmt->execute([$t
 <div class="field"><label>Notfallkontakt</label><input name="emergency_name"></div><div class="field"><label>Notfalltelefon</label><input name="emergency_phone"></div>
 <div class="field field-full"><label>Medizinische Hinweise</label><textarea name="medical_notes"></textarea></div><div class="field field-full"><label>Interne Notizen</label><textarea name="notes_text"></textarea></div>
 </div><div class="dialog-actions"><button type="button" class="btn btn-secondary" data-dialog-close>Abbrechen</button><button class="btn btn-primary">Speichern</button></div></form></dialog>
+
+<dialog id="template-dialog"><form method="post"><div class="dialog-head"><h2>Dienstvorlage</h2><button type="button" class="dialog-close" data-dialog-close aria-label="Schließen">×</button></div><div class="dialog-body form-grid">
+<?= csrf_field() ?><input type="hidden" name="action" value="template_save">
+<div class="field field-full"><label>Vorlagenname *</label><input name="title" required placeholder="z. B. Funkübung"></div><div class="field"><label>Art</label><select name="event_type"><option value="practice">Übung</option><option value="meeting">Besprechung</option><option value="trip">Ausflug</option><option value="competition">Wettbewerb</option><option value="other">Sonstiges</option></select></div><div class="field"><label>Dauer in Minuten</label><input name="duration_minutes" type="number" min="15" value="90"></div>
+<div class="field"><label>Ort</label><input name="location_name"></div><div class="field"><label>Max. Teilnehmende</label><input name="max_participants" type="number" min="1"></div><div class="field field-full"><label>Beschreibung</label><textarea name="description_text"></textarea></div><div class="field field-full"><label>Lernziele</label><textarea name="learning_goals"></textarea></div><div class="field field-full"><label>Benötigtes Material</label><textarea name="material_needed"></textarea></div>
+</div><div class="dialog-actions"><button type="button" class="btn btn-secondary" data-dialog-close>Abbrechen</button><button class="btn btn-primary">Vorlage speichern</button></div></form></dialog>
 
 <dialog id="event-dialog"><form method="post"><div class="dialog-head"><h2>Dienst oder Übung</h2><button type="button" class="dialog-close" data-dialog-close aria-label="Schließen">×</button></div><div class="dialog-body form-grid">
 <?= csrf_field() ?><input type="hidden" name="action" value="event_save"><input type="hidden" name="id" value="">

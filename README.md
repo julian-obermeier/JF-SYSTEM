@@ -9,6 +9,9 @@ Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehr
 - Dashboard mit Kennzahlen und nächstem Dienst
 - Erweiterte Mitgliederakten mit Anschrift, Schule, Größen und Notfallangaben
 - Sorgeberechtigte, Abholberechtigungen und Einwilligungsverwaltung
+- Geschützte Dokumentenablage in der Mitgliederakte (PDF, Bilder und Office-Dateien)
+- Dienstvorlagen und CSV-Exporte für Mitglieder, Dienste und Anwesenheit
+- Dashboard-Hinweise für Geburtstage und auslaufende Einwilligungen
 - Dienst- und Übungsplanung mit Leitung, Lernzielen, Material und Terminserien
 - Zu-/Absagen, Rückmeldefristen und Anwesenheitserfassung
 - Qualifikationen
@@ -37,7 +40,7 @@ Professionelle, mandantenfähige Webanwendung zur Verwaltung von Jugendfeuerwehr
 1. Vorher Datenbank und Dateien sichern.
 2. Aktualisierte Dateien hochladen.
 3. Als Administrator `/update/` aufrufen.
-4. Migration **002 – Mitgliederakten & Rückmeldungen** ausführen.
+4. Ausstehende Migrationen **002/003** unter `/update/` ausführen.
 5. Den Ordner `update/` anschließend sperren oder löschen.
 
 Die Anwendung benötigt weder Composer noch Node.js und ist für übliches Shared Hosting geeignet.
@@ -59,6 +62,6 @@ Support wird über OBERMEIER IT bereitgestellt: https://ticket.obermeier-it.de
 
 ## Status
 
-Aktueller Entwicklungsstand: **v0.2.0 – Mitgliederakten & Rückmeldungen**
+Aktueller Entwicklungsstand: **v0.3.0 – Dokumente, Vorlagen & Exporte**
 
 Diese Fassung ist eine produktionsnahe Grundlage. Vor einem Echtbetrieb mit personenbezogenen Daten sind Datenschutzkonzept, Berechtigungsmatrix, Backups, Mailversand und ein Hosting-Sicherheitsaudit zu vervollständigen.
