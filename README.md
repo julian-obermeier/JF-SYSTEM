@@ -60,8 +60,14 @@ Die Anwendung benötigt weder Composer noch Node.js und ist für übliches Share
 
 Support wird über OBERMEIER IT bereitgestellt: https://ticket.obermeier-it.de
 
+## SaaS-Betreiberbereich
+
+Plattform-Superadministratoren öffnen den zentralen Betreiberbereich unter `/saas/`. Beim ersten Aufruf werden die SaaS-Tabellen automatisch angelegt und die Tarife Free, Standard, Professional und Enterprise eingerichtet.
+
+Enthalten sind zunächst Mandanten-Onboarding, 30-Tage-Testphase, Tarifzuordnung, manuelle Abrechnung, Rechnungsstatus und vorbereitete Add-ons. Die Zahlungsanbindung ist bewusst providerneutral vorbereitet und kann später um Stripe oder PayPal ergänzt werden.
+
 ## Status
 
-Aktueller Entwicklungsstand: **v0.3.0 – Dokumente, Vorlagen & Exporte**
+Aktueller Entwicklungsstand: **v0.4.0 – SaaS-Grundlage und Betreiberbereich**
 
 Diese Fassung ist eine produktionsnahe Grundlage. Vor einem Echtbetrieb mit personenbezogenen Daten sind Datenschutzkonzept, Berechtigungsmatrix, Backups, Mailversand und ein Hosting-Sicherheitsaudit zu vervollständigen.
