@@ -1,8 +1,0 @@
-/config/config.php
-/storage/*.sqlite
-/storage/logs/*
-/storage/cache/*
-/storage/uploads/*
-!/storage/logs/.gitignore
-!/storage/cache/.gitignore
-!/storage/uploads/.gitignore
