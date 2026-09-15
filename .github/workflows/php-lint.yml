@@ -21,7 +21,9 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php-version }}
-          extensions: pdo_mysql, mbstring
+          extensions: pdo_mysql, pdo_sqlite, mbstring
           coverage: none
       - name: Lint PHP files
         run: find . -type f -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l
+      - name: SaaS onboarding smoke test
+        run: php tests/saas-smoke.php
