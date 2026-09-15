@@ -40,6 +40,9 @@
                 ['messages','#','i-mail','Nachrichten'], ['reports','#','i-chart','Auswertungen'],
                 ['settings','#','i-settings','Einstellungen'],
             ];
+            if ((int) ($user['is_superadmin'] ?? 0) === 1) {
+                $items[] = ['saas','/saas','i-settings','SaaS-Verwaltung'];
+            }
             foreach ($items as [$key,$href,$icon,$label]): ?>
                 <a class="nav-link <?= $active === $key ? 'is-active' : '' ?> <?= $href === '#' ? 'is-disabled' : '' ?>" href="<?= e($href) ?>" <?= $href === '#' ? 'aria-disabled="true" data-coming-soon="true"' : '' ?>>
                     <svg><use href="#<?= e($icon) ?>"/></svg><span><?= e($label) ?></span>
