@@ -70,6 +70,10 @@ final class Application
                 $this->attendance($method);
                 return;
             }
+            if ($path === '/saas') {
+                $this->saas($method, $user);
+                return;
+            }
 
             http_response_code(404);
             echo $this->view->render('errors/404', $this->shared('Nicht gefunden'));
@@ -223,6 +227,42 @@ final class Application
         }
         $rows = $selectedEvent ? $repository->attendanceMatrix($eventId) : [];
         echo $this->view->render('attendance/index', $this->shared('Anwesenheit', 'attendance') + compact('events', 'selectedEvent', 'rows'));
+    }
+
+    private function saas(string $method, array $user): void
+    {
+        if ((int) $user['is_superadmin'] !== 1) {
+            http_response_code(403);
+            echo $this->view->render('errors/404', $this->shared('Kein Zugriff'));
+            return;
+        }
+        $repository = new SaasRepository($this->db);
+        if ($method === 'POST') {
+            $this->assertCsrf();
+            $date = trim((string) ($_POST['trial_ends_at'] ?? ''));
+            try {
+                $repository->saveSubscription(
+                    (int) ($_POST['tenant_id'] ?? 0),
+                    (int) ($_POST['plan_id'] ?? 0),
+                    (string) ($_POST['status'] ?? ''),
+                    (string) ($_POST['cycle'] ?? ''),
+                    $date === '' ? null : $date,
+                    (int) $user['id'],
+                    (string) ($_SERVER['REMOTE_ADDR'] ?? '')
+                );
+                $_SESSION['flash'] = 'Abonnement wurde aktualisiert.';
+            } catch (\RuntimeException $exception) {
+                $_SESSION['flash'] = $exception->getMessage();
+            }
+            $this->redirect('/saas');
+        }
+        echo $this->view->render(
+            'saas/index',
+            $this->shared('SaaS-Verwaltung', 'saas') + [
+                'plans' => $repository->plans(),
+                'organizations' => $repository->tenants(),
+            ]
+        );
     }
 
     private function shared(string $title, string $active = ''): array
