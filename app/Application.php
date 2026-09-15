@@ -239,6 +239,15 @@ final class Application
         $repository = new SaasRepository($this->db);
         if ($method === 'POST') {
             $this->assertCsrf();
+            if (($_POST['action'] ?? '') === 'create_tenant') {
+                try {
+                    $repository->createTenant($_POST, (int) $user['id'], (string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+                    $_SESSION['flash'] = 'Mandant mit Admin-Konto und Testphase wurde angelegt.';
+                } catch (\RuntimeException $exception) {
+                    $_SESSION['flash'] = $exception->getMessage();
+                }
+                $this->redirect('/saas');
+            }
             $date = trim((string) ($_POST['trial_ends_at'] ?? ''));
             try {
                 $repository->saveSubscription(
