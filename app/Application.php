@@ -132,8 +132,22 @@ final class Application
     private function selectTenant(): void
     {
         $this->assertCsrf();
-        if (!$this->auth->selectTenant((int) ($_POST['tenant_id'] ?? 0))) {
+        $previous = (int) ($_SESSION['tenant_id'] ?? 0);
+        $target = (int) ($_POST['tenant_id'] ?? 0);
+        if (!$this->auth->selectTenant($target)) {
             throw new \RuntimeException('Die Organisation konnte nicht ausgewählt werden.');
+        }
+        $user = $this->auth->user();
+        if ($user && (int) $user['is_superadmin'] === 1 && $previous !== $target) {
+            $audit = $this->db->prepare(
+                'INSERT INTO audit_logs(tenant_id,user_id,action_name,entity_type,entity_id,description_text,ip_address)
+                 VALUES (:tenant,:user,\'tenant.switched\',\'tenant\',:entity,:description,:ip)'
+            );
+            $audit->execute([
+                'tenant' => $target, 'user' => (int) $user['id'], 'entity' => $target,
+                'description' => "Betreiberwechsel von Mandant {$previous} nach {$target}",
+                'ip' => substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45),
+            ]);
         }
         $this->redirect('/');
     }
