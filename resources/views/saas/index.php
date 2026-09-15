@@ -1,6 +1,7 @@
 <?php declare(strict_types=1); ?>
 <header class="page-header">
     <div><h1>SaaS-Verwaltung</h1><p>Mandanten, Tarife und Laufzeiten zentral im Blick.</p></div>
+    <button class="button button-primary" type="button" data-dialog-open="new-tenant-dialog">Mandant anlegen</button>
 </header>
 <section class="panel">
     <header class="panel-header"><h2>Mandanten</h2><span><?= count($organizations) ?> Organisationen</span></header>
@@ -37,3 +38,21 @@
     </table></div>
 </section>
 <p class="saas-hint">Diese Stufe verwaltet manuelle Tarif- und Abostände. Zahlungen, Rechnungen und automatische Tariflimits sind noch nicht aktiviert.</p>
+<dialog class="modal" id="new-tenant-dialog">
+    <form class="modal-card" action="/saas" method="post">
+        <?= csrf_field() ?><input type="hidden" name="action" value="create_tenant">
+        <header><div><h2>Mandant anlegen</h2><p>Ein Admin-Konto und eine 30-Tage-Testphase werden angelegt.</p></div><button type="button" class="icon-button" data-dialog-close aria-label="Schließen"><svg><use href="#i-close"/></svg></button></header>
+        <div class="form-grid">
+            <label class="span-2">Organisation<input name="organization" maxlength="180" required></label>
+            <label>Kurzname für spätere URL<input name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="120" placeholder="jugendfeuerwehr-erda" required></label>
+            <label>Ort<input name="city" maxlength="120"></label>
+            <label class="span-2">Tarif<select name="plan_id" required><?php foreach ($plans as $plan): ?><option value="<?= (int) $plan['id'] ?>"><?= e($plan['name']) ?></option><?php endforeach; ?></select></label>
+            <label>Vorname Admin<input name="first_name" maxlength="100" required></label>
+            <label>Nachname Admin<input name="last_name" maxlength="100" required></label>
+            <label class="span-2">E-Mail Admin<input name="email" type="email" maxlength="190" autocomplete="off" required></label>
+            <label class="span-2">Startpasswort für neue Konten<input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="Nur bei neuer E-Mail erforderlich"></label>
+        </div>
+        <p class="saas-hint">Ist die E-Mail bereits im System vorhanden, wird das bestehende Konto zugeordnet; sein Passwort bleibt unverändert. Bei neuen Konten das Startpasswort vertraulich an den Admin übergeben. E-Mail-Bestätigung und Passwort-Reset folgen später.</p>
+        <footer><button type="button" class="button button-secondary" data-dialog-close>Abbrechen</button><button type="submit" class="button button-primary">Mandant erstellen</button></footer>
+    </form>
+</dialog>
