@@ -57,6 +57,13 @@ final class AuthService
             return [];
         }
 
+        if ((int) $user['is_superadmin'] === 1) {
+            return $this->db->query(
+                'SELECT t.id, t.name, t.slug, t.city, t.primary_color, t.logo_path, \'superadmin\' AS role_key
+                 FROM tenants t WHERE t.is_active=1 ORDER BY t.name'
+            )->fetchAll();
+        }
+
         $statement = $this->db->prepare(
             'SELECT t.id, t.name, t.slug, t.city, t.primary_color, t.logo_path, tu.role_key
              FROM tenant_users tu
